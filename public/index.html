@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Biometric Web3 Voting System | Ethereum Sepolia</title>
+  <meta name="description" content="Production-grade, tamper-proof biometric voting system bridging ESP32 edge hardware to Ethereum Sepolia smart contracts with SHA-256 identity anonymization.">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="navbar">
+    <div class="brand">
+      <div class="brand-icon">🗳️</div>
+      <div>
+        <h1 class="brand-title" style="font-size: 1.15rem; margin: 0;">BIOVOTE // WEB3</h1>
+        <div class="brand-subtitle">Biometric Blockchain Bridge</div>
+      </div>
+    </div>
+
+    <!-- Live Telemetry Row -->
+    <div class="telemetry-row">
+      <div class="telemetry-pill">
+        <span class="pill-dot"></span>
+        <span>Sepolia EVM</span>
+      </div>
+      <div class="telemetry-pill">
+        <span>Block:</span>
+        <span class="pill-value" id="telemetry-block">#...</span>
+      </div>
+      <div class="telemetry-pill">
+        <span>Latency:</span>
+        <span class="pill-value" id="telemetry-latency">...ms</span>
+      </div>
+      <div class="telemetry-pill">
+        <span>Contract:</span>
+        <a id="contract-etherscan-link" href="#" target="_blank" rel="noopener" class="tx-hash-link">
+          <span class="pill-value" id="telemetry-contract">0xa899...5a3f</span>
+        </a>
+      </div>
+      <div class="telemetry-pill">
+        <span>Relayer:</span>
+        <span class="pill-value" id="telemetry-relayer">Loading...</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="refreshData(true)">🔄 Refresh</button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="nav-tabs">
+    <button class="tab-btn active" data-tab="tab-tallies">
+      <span>📊</span> Live Election Tallies
+    </button>
+    <button class="tab-btn" data-tab="tab-architecture">
+      <span>🏗️</span> System Architecture
+    </button>
+    <button class="tab-btn" data-tab="tab-simulator">
+      <span>🗳️</span> ESP32 Edge Simulator
+    </button>
+    <button class="tab-btn" data-tab="tab-auditor">
+      <span>🔍</span> Fraud Auditor
+    </button>
+    <button class="tab-btn" data-tab="tab-ledger">
+      <span>📜</span> Confirmed Ledger
+    </button>
+  </nav>
+
+  <!-- Main Container -->
+  <main class="container">
+
+    <!-- TAB 1: LIVE ELECTION TALLIES -->
+    <section id="tab-tallies" class="tab-content active">
+      <!-- High-Level Stats Grid -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div>
+            <div class="stat-label">Total Ballots Cast</div>
+            <div class="stat-value" id="stat-total-votes">0</div>
+            <div class="stat-subtitle">Immutable on-chain count</div>
+          </div>
+          <div class="stat-icon">🗳️</div>
+        </div>
+
+        <div class="stat-card">
+          <div>
+            <div class="stat-label">Current Leader</div>
+            <div class="stat-value" style="font-size: 1.35rem;" id="stat-leading-party">...</div>
+            <div class="stat-subtitle">Highest tally on Sepolia</div>
+          </div>
+          <div class="stat-icon">🏆</div>
+        </div>
+
+        <div class="stat-card">
+          <div>
+            <div class="stat-label">Cryptographic Integrity</div>
+            <div class="stat-value" style="color: var(--accent-emerald);">100%</div>
+            <div class="stat-subtitle">SHA-256 + Zero Collision Queue</div>
+          </div>
+          <div class="stat-icon">🛡️</div>
+        </div>
+
+        <div class="stat-card">
+          <div>
+            <div class="stat-label">Smart Contract</div>
+            <div class="stat-value" style="font-size: 1.1rem; color: var(--accent-purple);">VotingRegistry</div>
+            <div class="stat-subtitle">Verified EVM Bytecode</div>
+          </div>
+          <div class="stat-icon">📜</div>
+        </div>
+      </div>
+
+      <!-- Party Vote Cards Grid -->
+      <div class="section-header">
+        <div>
+          <h2 class="section-title"><span>🏛️</span> Certified Candidate Results</h2>
+          <div class="section-subtitle">Real-time state pulled directly from the Ethereum Sepolia contract mapping</div>
+        </div>
+      </div>
+
+      <div class="party-grid" id="party-cards-grid">
+        <!-- Rendered dynamically by app.js -->
+        <div class="empty-state">Loading candidate tallies from blockchain...</div>
+      </div>
+
+      <!-- Quick Action Banner -->
+      <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: gap; margin-top: 24px;">
+        <div>
+          <h3 style="font-size: 1.1rem; margin-bottom: 4px;">Ready to test an edge vote?</h3>
+          <p style="font-size: 0.85rem; color: var(--text-secondary);">Simulate an R307 fingerprint scan and broadcast a verified transaction to Sepolia.</p>
+        </div>
+        <button class="btn btn-primary" onclick="document.querySelector('[data-tab=\'tab-simulator\']').click()">
+          Open Hardware Simulator ➔
+        </button>
+      </div>
+    </section>
+
+    <!-- TAB 2: INTERACTIVE SYSTEM ARCHITECTURE -->
+    <section id="tab-architecture" class="tab-content">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title"><span>🏗️</span> End-to-End System Architecture</h2>
+          <div class="section-subtitle">3-Tier Biometric to EVM Blockchain Data Pipeline</div>
+        </div>
+        <button class="btn btn-primary btn-sm" id="btn-trigger-arch-flow">
+          ⚡ Simulate Pipeline Flow
+        </button>
+      </div>
+
+      <div class="arch-container">
+        <!-- LAYER 1: HARDWARE -->
+        <div class="arch-layer hw">
+          <div class="layer-title-bar">
+            <h3 class="layer-title">
+              <span>📟</span> Layer 1: Edge Hardware Layer
+            </h3>
+            <span class="layer-badge badge-hw">IoT Edge Devices</span>
+          </div>
+          <div class="nodes-grid">
+            <div class="arch-node" id="node-hw-sensor">
+              <div class="node-icon">👆</div>
+              <h4 class="node-title">R307 Optical Sensor</h4>
+              <p class="node-desc">Captures voter minutiae template; handles 1:N local matching and prevents multi-scan fraud.</p>
+              <span class="node-tag">UART @ 57600 Baud</span>
+            </div>
+
+            <div class="arch-node">
+              <div class="node-icon">🔘</div>
+              <h4 class="node-title">Ballot Push Buttons</h4>
+              <p class="node-desc">Hardware interrupt pins dedicated to selecting democratic candidates.</p>
+              <span class="node-tag">GPIO: 13, 14, 25, 26</span>
+            </div>
+
+            <div class="arch-node" id="node-hw-esp32">
+              <div class="node-icon">⚡</div>
+              <h4 class="node-title">ESP32 MCU</h4>
+              <p class="node-desc">Coordinates local hardware, builds JSON payload, and initiates Wi-Fi HTTP POST request.</p>
+              <span class="node-tag">Tensilica Xtensa Dual-Core</span>
+            </div>
+
+            <div class="arch-node">
+              <div class="node-icon">🖥️</div>
+              <h4 class="node-title">16x2 I2C LCD</h4>
+              <p class="node-desc">Provides immediate visual confirmation ("Vote Verified") to the voter at the physical booth.</p>
+              <span class="node-tag">I2C Address: 0x27</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONNECTOR 1 -->
+        <div class="pipe-bridge" id="pipe-hw-to-mw">
+          <span>⬇ Outbound Wi-Fi HTTP POST (voterID, party) ⬇</span>
+        </div>
+
+        <!-- LAYER 2: MIDDLEWARE -->
+        <div class="arch-layer mw">
+          <div class="layer-title-bar">
+            <h3 class="layer-title">
+              <span>🖥️</span> Layer 2: Node.js Middleware Relayer
+            </h3>
+            <span class="layer-badge badge-mw">Web3 Bridge Engine</span>
+          </div>
+          <div class="nodes-grid">
+            <div class="arch-node" id="node-mw-api">
+              <div class="node-icon">🌐</div>
+              <h4 class="node-title">Express API Ingestion</h4>
+              <p class="node-desc">Multi-format payload receiver accommodating direct ESP32 hardware, n8n webhooks, and dashboard tests.</p>
+              <span class="node-tag">Port 3000 / 0.0.0.0</span>
+            </div>
+
+            <div class="arch-node" id="node-mw-crypto">
+              <div class="node-icon">🔐</div>
+              <h4 class="node-title">SHA-256 Identity Anonymizer</h4>
+              <p class="node-desc">Hashes voter ID with cryptographic salt so raw biometric identities are NEVER stored on-chain.</p>
+              <span class="node-tag">Crypto Hashing: SHA-256</span>
+            </div>
+
+            <div class="arch-node" id="node-mw-preflight">
+              <div class="node-icon">🛡️</div>
+              <h4 class="node-title">Pre-Flight Gas Guard</h4>
+              <p class="node-desc">Performs zero-cost view call to check <code>hasVoted(voterHash)</code> before sending transaction, saving gas fees.</p>
+              <span class="node-tag">EVM Static Call</span>
+            </div>
+
+            <div class="arch-node">
+              <div class="node-icon">⛓️</div>
+              <h4 class="node-title">Transaction Queue Mutex</h4>
+              <p class="node-desc">Prevents EVM nonce race conditions by serializing simultaneous voting requests.</p>
+              <span class="node-tag">Sequential Promise Queue</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONNECTOR 2 -->
+        <div class="pipe-bridge" id="pipe-mw-to-bc">
+          <span>⬇ Outbound Signed JSON-RPC (castVote) ⬇</span>
+        </div>
+
+        <!-- LAYER 3: BLOCKCHAIN -->
+        <div class="arch-layer bc">
+          <div class="layer-title-bar">
+            <h3 class="layer-title">
+              <span>⛓️</span> Layer 3: Ethereum Blockchain Layer
+            </h3>
+            <span class="layer-badge badge-bc">Decentralized Trust</span>
+          </div>
+          <div class="nodes-grid">
+            <div class="arch-node" id="node-bc-evm">
+              <div class="node-icon">🌐</div>
+              <h4 class="node-title">Ethereum Sepolia Testnet</h4>
+              <p class="node-desc">Public, decentralized, auditable proof-of-stake EVM network executing state transitions.</p>
+              <span class="node-tag">Chain ID: 11155111</span>
+            </div>
+
+            <div class="arch-node" id="node-bc-contract" style="grid-column: span 2;">
+              <div class="node-icon">📜</div>
+              <h4 class="node-title">VotingRegistry.sol (Smart Contract)</h4>
+              <p class="node-desc">Enforces single-vote validation per anonymized hash and immutably increments candidate tallies.</p>
+              <div style="font-family: var(--font-mono); font-size: 0.76rem; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; margin-top: 10px; color: var(--accent-cyan);">
+                mapping(string => bool) public hasVoted;<br>
+                mapping(string => uint256) public partyVotes;<br>
+                require(!hasVoted[voterHash], "Fraud Alert: Double Vote!");
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: ESP32 EDGE SIMULATOR -->
+    <section id="tab-simulator" class="tab-content">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title"><span>🗳️</span> ESP32 Edge Device Simulator</h2>
+          <div class="section-subtitle">Simulate real-time biometric voting transactions and test fraud prevention</div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px; align-items: start;">
+        <!-- Controls Card -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 24px;">
+          <h3 style="font-size: 1.1rem; margin-bottom: 16px;">Biometric Scan & Candidate Choice</h3>
+
+          <div class="form-group">
+            <label class="form-label" for="sim-voter-id">Voter Fingerprint ID / Sensor UID</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="sim-voter-id" class="form-control" placeholder="e.g. FP_UID_982341" value="FP_UID_482910">
+              <button class="btn btn-secondary btn-sm" id="btn-random-voter" title="Generate New Random ID">🎲 Random</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="sim-candidate-select">Candidate / Political Party</label>
+            <select id="sim-candidate-select" class="form-select">
+              <option value="Democracy Forward">Democracy Forward</option>
+              <option value="Alliance for Progress">Alliance for Progress</option>
+              <option value="Liberty Coalition">Liberty Coalition</option>
+              <option value="Green Earth Party">Green Earth Party</option>
+            </select>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 24px;">
+            <button class="btn btn-primary" id="btn-submit-vote" style="justify-content: center;">
+              🚀 Cast Verified Vote on Sepolia
+            </button>
+            <button class="btn btn-danger" id="btn-test-fraud" style="justify-content: center;" title="Attempt double-voting with this ID">
+              🛑 Test Fraud Detection (Submit Duplicate)
+            </button>
+          </div>
+
+          <div style="margin-top: 20px; font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;">
+            💡 <strong>How it works:</strong> The Node.js server hashes your Voter ID with SHA-256 + secret salt, checks the smart contract to prevent double-voting, and signs the transaction using your relayer wallet.
+          </div>
+        </div>
+
+        <!-- Pipeline Live Console Output -->
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 0.82rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;">
+              Live Pipeline Stream
+            </span>
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('sim-console').innerHTML=''" style="padding: 2px 8px; font-size: 0.72rem;">
+              Clear Console
+            </button>
+          </div>
+          <div id="sim-console" class="console-box">
+<span class="log-time">[System]</span> Biometric Blockchain Voting Station initialized.
+<span class="log-time">[System]</span> Connected to Ethereum Sepolia via Node.js Web3 Bridge.
+<span class="log-time">[System]</span> Ready to process sensor input...
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: VOTER FRAUD AUDITOR -->
+    <section id="tab-auditor" class="tab-content">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title"><span>🔍</span> Voter Registry Fraud Auditor</h2>
+          <div class="section-subtitle">Cryptographically inspect whether a voter ID or hash has already cast a ballot</div>
+        </div>
+      </div>
+
+      <div style="max-width: 700px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 28px;">
+        <div class="form-group">
+          <label class="form-label" for="audit-input">Enter Voter ID or 64-character SHA-256 Hash</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="audit-input" class="form-control" placeholder="e.g. FP_UID_482910 or 8f4c2e...">
+            <button class="btn btn-primary" id="btn-audit-check">Check Status</button>
+          </div>
+        </div>
+
+        <div id="audit-result" style="margin-top: 20px;">
+          <div style="color: var(--text-muted); font-size: 0.85rem;">
+            Enter an identifier above to perform a zero-gas on-chain fraud check against the Sepolia registry.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: ON-CHAIN TRANSACTION LEDGER -->
+    <section id="tab-ledger" class="tab-content">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title"><span>📜</span> Confirmed On-Chain Audit Ledger</h2>
+          <div class="section-subtitle">Real-time immutable ledger of transactions confirmed by the Ethereum Sepolia network</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="fetchRecentLedger()">
+          🔄 Refresh Ledger
+        </button>
+      </div>
+
+      <div class="table-container">
+        <table class="custom-table">
+          <thead>
+            <tr>
+              <th>Index</th>
+              <th>Voter SHA-256 Hash</th>
+              <th>Candidate Party</th>
+              <th>EVM Block</th>
+              <th>Transaction Hash</th>
+            </tr>
+          </thead>
+          <tbody id="ledger-tbody">
+            <!-- Dynamically populated -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Global Toast -->
+  <div id="global-toast" class="toast"></div>
+
+  <!-- JavaScript -->
+  <script src="js/app.js"></script>
+</body>
+</html>

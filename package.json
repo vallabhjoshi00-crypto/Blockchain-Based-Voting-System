@@ -1,0 +1,33 @@
+{
+  "name": "biometric-blockchain-voting-server",
+  "version": "1.0.0",
+  "description": "Secure Biometric ESP32-to-Ethereum Sepolia Web3 Voting Relay & Dashboard",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "compile": "hardhat compile",
+    "deploy": "node scripts/deploy.js"
+  },
+  "keywords": [
+    "blockchain",
+    "ethereum",
+    "sepolia",
+    "esp32",
+    "biometric",
+    "voting",
+    "web3",
+    "ethers"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "ethers": "^6.17.0",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "hardhat": "^3.12.0"
+  }
+}

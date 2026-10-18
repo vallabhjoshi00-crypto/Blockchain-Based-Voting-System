@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Biometric Voting System Architecture</title>
+    <style>
+        :root {
+            --hardware-bg: #2C3E50;
+            --hardware-border: #1a252f;
+            --middleware-bg: #27AE60;
+            --middleware-border: #1e8449;
+            --blockchain-bg: #8E44AD;
+            --blockchain-border: #732d91;
+            --text-color: #333;
+            --bg-color: #f8f9fa;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 40px 20px;
+        }
+
+        .header-title {
+            text-align: center;
+            font-size: 28px;
+            margin-bottom: 40px;
+            color: #2c3e50;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        .diagram-container {
+            max-width: 800px;
+            margin: 0 auto 50px auto;
+            background: #ffffff;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.08);
+            border-top: 5px solid #bdc3c7;
+        }
+
+        .diagram-container.hw { border-top-color: var(--hardware-bg); }
+        .diagram-container.mw { border-top-color: var(--middleware-bg); }
+        .diagram-container.bc { border-top-color: var(--blockchain-bg); }
+
+        .diagram-title {
+            text-align: center;
+            font-size: 22px;
+            margin-bottom: 30px;
+            color: #34495e;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 15px;
+        }
+
+        /* Flexbox Layouts for Blocks */
+        .flow-row {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 40px;
+            margin-bottom: 20px;
+        }
+
+        .flow-col {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* The Nodes (Blocks) */
+        .node {
+            padding: 20px 30px;
+            border-radius: 8px;
+            color: #ffffff;
+            font-weight: 600;
+            font-size: 16px;
+            text-align: center;
+            min-width: 220px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+            position: relative;
+        }
+
+        .node-subtext {
+            display: block;
+            font-size: 12px;
+            font-weight: 400;
+            margin-top: 8px;
+            opacity: 0.85;
+        }
+
+        .hw-node { background-color: var(--hardware-bg); border: 2px solid var(--hardware-border); }
+        .mw-node { background-color: var(--middleware-bg); border: 2px solid var(--middleware-border); }
+        .bc-node { background-color: var(--blockchain-bg); border: 2px solid var(--blockchain-border); }
+
+        /* Arrows */
+        .arrow-down {
+            width: 0;
+            height: 0;
+            border-left: 12px solid transparent;
+            border-right: 12px solid transparent;
+            border-top: 20px solid #95a5a6;
+            margin: 15px 0;
+        }
+
+        .arrow-down-long {
+            width: 4px;
+            height: 40px;
+            background-color: #95a5a6;
+            margin: 0 auto;
+            position: relative;
+        }
+        
+        .arrow-down-long::after {
+            content: '';
+            position: absolute;
+            bottom: -15px;
+            left: -10px;
+            border-left: 12px solid transparent;
+            border-right: 12px solid transparent;
+            border-top: 20px solid #95a5a6;
+        }
+
+        /* Connection Lines */
+        .line-horizontal {
+            width: 100px;
+            height: 4px;
+            background-color: #95a5a6;
+        }
+
+        .network-bridge {
+            text-align: center;
+            padding: 10px;
+            background: #ecf0f1;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #7f8c8d;
+            margin: 20px 0;
+            border: 2px dashed #bdc3c7;
+        }
+    </style>
+</head>
+<body>
+
+    <h1 class="header-title">Biometric Voting System Architectures</h1>
+
+    <!-- DIAGRAM 1: HARDWARE LAYER -->
+    <div class="diagram-container hw">
+        <h2 class="diagram-title">Diagram 1: Edge Hardware Layer</h2>
+        
+        <div class="flow-row">
+            <div class="node hw-node">
+                R307 Fingerprint Sensor
+                <span class="node-subtext">(UART @ 57600 Baud)</span>
+            </div>
+            <div class="node hw-node">
+                Push Button Interface
+                <span class="node-subtext">(GPIO Pins: 13, 14, 25, 26)</span>
+            </div>
+        </div>
+
+        <div class="flow-col">
+            <div class="arrow-down-long" style="height: 30px; margin-bottom: 15px;"></div>
+        </div>
+
+        <div class="flow-col">
+            <div class="node hw-node" style="min-width: 350px; font-size: 18px;">
+                ESP32 Microcontroller
+                <span class="node-subtext">Local Match Verification & Duplicate Flagging</span>
+            </div>
+        </div>
+
+        <div class="flow-col">
+            <div class="arrow-down-long" style="height: 30px; margin-bottom: 15px;"></div>
+        </div>
+
+        <div class="flow-col">
+            <div class="node hw-node">
+                16x2 I2C LCD Display
+                <span class="node-subtext">Voter Status Feedback</span>
+            </div>
+        </div>
+        
+        <div class="network-bridge">⬇ Outbound: HTTP POST over Local Wi-Fi ⬇</div>
+    </div>
+
+    <!-- DIAGRAM 2: MIDDLEWARE LAYER -->
+    <div class="diagram-container mw">
+        <h2 class="diagram-title">Diagram 2: Node.js Middleware Layer</h2>
+
+        <div class="network-bridge" style="margin-top: 0;">⬆ Inbound: JSON Payload (voterID, party) ⬆</div>
+
+        <div class="flow-col">
+            <div class="node mw-node" style="min-width: 350px;">
+                Express API Server
+                <span class="node-subtext">Receives Edge Data on Port 3000</span>
+            </div>
+            
+            <div class="arrow-down"></div>
+
+            <div class="node mw-node" style="min-width: 350px;">
+                Identity Anonymization Engine
+                <span class="node-subtext">Converts voterID into SHA-256 Crypto Hash</span>
+            </div>
+
+            <div class="arrow-down"></div>
+
+            <div class="node mw-node" style="min-width: 350px;">
+                Pre-Flight Fraud Validation
+                <span class="node-subtext">Reads state from Blockchain to prevent gas waste</span>
+            </div>
+
+            <div class="arrow-down"></div>
+
+            <div class="node mw-node" style="min-width: 350px; font-size: 18px;">
+                Ethers.js Web3 Bridge
+                <span class="node-subtext">ECDSA Transaction Signing using Private Key</span>
+            </div>
+        </div>
+
+        <div class="network-bridge">⬇ Outbound: JSON-RPC Web3 Request ⬇</div>
+    </div>
+
+    <!-- DIAGRAM 3: BLOCKCHAIN LAYER -->
+    <div class="diagram-container bc">
+        <h2 class="diagram-title">Diagram 3: Ethereum Blockchain Layer</h2>
+
+        <div class="network-bridge" style="margin-top: 0;">⬆ Inbound: Signed EVM Transaction ⬆</div>
+
+        <div class="flow-col">
+            <div class="node bc-node" style="min-width: 350px;">
+                Ethereum Sepolia Testnet
+                <span class="node-subtext">Publicly Auditable Decentralized Network</span>
+            </div>
+
+            <div class="arrow-down-long" style="height: 40px; margin-bottom: 15px;"></div>
+
+            <div class="node bc-node" style="min-width: 400px; font-size: 18px;">
+                VotingRegistry.sol (Smart Contract)
+                <span class="node-subtext" style="margin-top: 15px; text-align: left; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 4px;">
+                    <strong>State Variables:</strong><br>
+                    • mapping(string => bool) public hasVoted;<br>
+                    • mapping(string => uint256) public partyVotes;<br><br>
+                    <strong>Core Logic:</strong><br>
+                    • require(!hasVoted[voterHash])
+                </span>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
