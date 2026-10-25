@@ -2,6 +2,7 @@
 
 A production-ready, tamper-proof biometric voting system bridging **ESP32 Edge IoT hardware** (R307 optical fingerprint sensor, tactile push-buttons, 16x2 LCD) to the **Ethereum Sepolia Blockchain** via an optimized **Node.js Web3 Bridge** and modern glassmorphic monitoring dashboard.
 
+
 ---
 
 ## 🌟 Key Architecture & Highlights
@@ -175,5 +176,6 @@ projectserver/
 3. **Pre-Flight Gas Guard**: The Node.js bridge performs zero-cost static view calls to verify eligibility before spending gas on a state-changing transaction.
 4. **Nonce Collision Protection**: In-memory async queue serializes simultaneous voting transactions from multiple physical voting booths.
 5. **Secret Sanitization**: Private keys and seed phrases are purged from source code and kept strictly in `.env`.
-#   B l o c k c h a i n - B a s e d - V o t i n g - S y s t e m  
+#   B l o c k c h a i n - B a s e d - V o t i n g - S y s t e m 
+ 
  
