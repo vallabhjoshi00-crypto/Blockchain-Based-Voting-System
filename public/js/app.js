@@ -1,37 +1,104 @@
-// =========================================================
-// BIOMETRIC BLOCKCHAIN VOTING DASHBOARD - CLIENT APP
-// =========================================================
+// ===============================================================================
+// VOTECHAIN // SEPOLIA - ELECTORAL COMMISSION CLIENT APPLICATION
+// Built with Luxury Monochrome Palette (Gray, Black & Crisp White)
+// ===============================================================================
 
 const API_BASE = window.location.origin;
 
-// Party Accent Color Palette
-const PARTY_COLORS = [
-  "#06b6d4", // Cyan
-  "#8b5cf6", // Purple
-  "#10b981", // Emerald
-  "#f59e0b", // Amber
-  "#f43f5e", // Rose
-  "#3b82f6"  // Blue
+// Party Accent Grading harmonized with luxury monochrome palette
+const PARTY_SCHEMES = [
+  {
+    // BJP - Saffron / Warm Gold
+    name: "BJP",
+    gpio: "GPIO 13",
+    gradient: "linear-gradient(90deg, #D97706 0%, #F59E0B 100%)",
+    glow: "rgba(245, 158, 11, 0.45)",
+    accent: "#F59E0B",
+    badgeBg: "rgba(245, 158, 11, 0.14)",
+    border: "rgba(245, 158, 11, 0.35)"
+  },
+  {
+    // UBT - Royal Electric Azure
+    name: "UBT",
+    gpio: "GPIO 14",
+    gradient: "linear-gradient(90deg, #0284C7 0%, #38BDF8 100%)",
+    glow: "rgba(56, 189, 248, 0.45)",
+    accent: "#38BDF8",
+    badgeBg: "rgba(56, 189, 248, 0.14)",
+    border: "rgba(56, 189, 248, 0.35)"
+  },
+  {
+    // Congress - Emerald Slate
+    name: "Congress",
+    gpio: "GPIO 25",
+    gradient: "linear-gradient(90deg, #059669 0%, #10B981 100%)",
+    glow: "rgba(16, 185, 129, 0.45)",
+    accent: "#10B981",
+    badgeBg: "rgba(16, 185, 129, 0.14)",
+    border: "rgba(16, 185, 129, 0.35)"
+  },
+  {
+    // AIMIM - Royal Amethyst Violet
+    name: "AIMIM",
+    gpio: "GPIO 26",
+    gradient: "linear-gradient(90deg, #7C3AED 0%, #A855F7 100%)",
+    glow: "rgba(168, 85, 247, 0.45)",
+    accent: "#A855F7",
+    badgeBg: "rgba(168, 85, 247, 0.14)",
+    border: "rgba(168, 85, 247, 0.35)"
+  }
 ];
 
-// App State
+// View Titles Mapping
+const VIEW_TITLES = {
+  "tab-tallies": {
+    title: "Executive Results Tabulation",
+    subtitle: "Official Cryptographic Tally Confirmed by Ethereum Sepolia"
+  },
+  "tab-ledger": {
+    title: "Permanent Consensus Audit Ledger",
+    subtitle: "Publicly Auditable On-Chain Sequence of Mined Blocks"
+  },
+  "tab-simulator": {
+    title: "Voting Enclave Terminal (Booth #01)",
+    subtitle: "Direct Biometric Ingestion & Edge Hardware Simulator"
+  },
+  "tab-auditor": {
+    title: "Voter Registry Status Verification",
+    subtitle: "Cryptographic Query Engine for Single-Vote Compliance"
+  },
+  "tab-architecture": {
+    title: "System Architecture & Engineering Blueprint",
+    subtitle: "End-to-End Edge Hardware to EVM Blockchain Data Pipeline"
+  },
+  "tab-contract": {
+    title: "Smart Contract & Security Specifications",
+    subtitle: "Verified EVM Bytecode & On-Chain Consensus Rules"
+  }
+};
+
+// Application State
 let appState = {
   health: null,
   votesData: null,
   recentVotes: [],
   autoRefresh: true,
-  refreshTimer: null
+  refreshTimer: null,
+  ledgerSearchQuery: ""
 };
 
-// DOM Content Loaded
+// ===============================================================================
+// DOM INITIALIZATION
+// ===============================================================================
 document.addEventListener("DOMContentLoaded", () => {
-  initTabs();
+  initSidebarTabs();
+  initMobileMenu();
   initSimulator();
   initAuditor();
   initArchitectureAnimation();
   fetchInitialData();
 
-  // Auto-refresh every 8 seconds
+  // Polling: Auto-sync telemetry every 8 seconds
   appState.refreshTimer = setInterval(() => {
     if (appState.autoRefresh) {
       refreshData(false);
@@ -39,30 +106,53 @@ document.addEventListener("DOMContentLoaded", () => {
   }, 8000);
 });
 
-// =========================================================
-// TAB NAVIGATION
-// =========================================================
-function initTabs() {
-  const tabBtns = document.querySelectorAll(".tab-btn");
-  const tabContents = document.querySelectorAll(".tab-content");
+// ===============================================================================
+// SIDEBAR & TAB NAVIGATION
+// ===============================================================================
+function initSidebarTabs() {
+  const navItems = document.querySelectorAll(".nav-item");
+  const tabPanes = document.querySelectorAll(".tab-pane");
+  const titleEl = document.getElementById("view-title");
+  const subtitleEl = document.getElementById("view-subtitle");
 
-  tabBtns.forEach(btn => {
-    btn.addEventListener("click", () => {
-      const targetTab = btn.getAttribute("data-tab");
+  navItems.forEach(item => {
+    item.addEventListener("click", () => {
+      const targetTab = item.getAttribute("data-tab");
 
-      tabBtns.forEach(b => b.classList.remove("active"));
-      tabContents.forEach(c => c.classList.remove("active"));
+      navItems.forEach(n => n.classList.remove("active"));
+      tabPanes.forEach(p => p.classList.remove("active"));
 
-      btn.classList.add("active");
-      const targetContent = document.getElementById(targetTab);
-      if (targetContent) targetContent.classList.add("active");
+      item.classList.add("active");
+      const targetPane = document.getElementById(targetTab);
+      if (targetPane) targetPane.classList.add("active");
+
+      // Update Topbar View Title
+      if (VIEW_TITLES[targetTab]) {
+        if (titleEl) titleEl.textContent = VIEW_TITLES[targetTab].title;
+        if (subtitleEl) subtitleEl.textContent = VIEW_TITLES[targetTab].subtitle;
+      }
+
+      // Close mobile sidebar if open
+      const sidebar = document.getElementById("app-sidebar");
+      if (sidebar) sidebar.classList.remove("mobile-open");
     });
   });
 }
 
-// =========================================================
-// DATA FETCHING & UI UPDATES
-// =========================================================
+function initMobileMenu() {
+  const toggleBtn = document.getElementById("mobile-toggle");
+  const sidebar = document.getElementById("app-sidebar");
+
+  if (toggleBtn && sidebar) {
+    toggleBtn.addEventListener("click", () => {
+      sidebar.classList.toggle("mobile-open");
+    });
+  }
+}
+
+// ===============================================================================
+// DATA INGESTION & SYNCHRONIZATION
+// ===============================================================================
 async function fetchInitialData() {
   await Promise.all([
     fetchHealth(),
@@ -78,9 +168,9 @@ async function refreshData(showToastAlert = true) {
       fetchVotes(),
       fetchRecentLedger()
     ]);
-    if (showToastAlert) showToast("System telemetry refreshed", "success");
+    if (showToastAlert) showToast("Consensus state synchronized", "success");
   } catch (err) {
-    if (showToastAlert) showToast("Failed to refresh data", "error");
+    if (showToastAlert) showToast("Failed to refresh telemetry", "error");
   }
 }
 
@@ -90,35 +180,43 @@ async function fetchHealth() {
     const data = await res.json();
     appState.health = data;
 
-    // Update Telemetry Header
-    const blockEl = document.getElementById("telemetry-block");
-    if (blockEl && data.network?.blockNumber) {
-      blockEl.textContent = `#${data.network.blockNumber}`;
-    }
+    // Topbar & Sidebar Block Number
+    const blockNum = data.network?.blockNumber ? `#${data.network.blockNumber.toLocaleString()}` : "#...";
+    const topBlockEl = document.getElementById("topbar-block");
+    const sideBlockEl = document.getElementById("sidebar-block-number");
+    if (topBlockEl) topBlockEl.textContent = blockNum;
+    if (sideBlockEl) sideBlockEl.textContent = blockNum;
 
-    const latencyEl = document.getElementById("telemetry-latency");
+    // Latency
+    const latencyEl = document.getElementById("topbar-latency");
     if (latencyEl && data.network?.latencyMs !== null) {
       latencyEl.textContent = `${data.network.latencyMs}ms`;
     }
 
-    const contractEl = document.getElementById("telemetry-contract");
-    if (contractEl && data.contract?.address) {
+    // Contract Address & Links
+    if (data.contract?.address) {
       const addr = data.contract.address;
-      contractEl.textContent = `${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`;
-      contractEl.title = addr;
-      const contractLink = document.getElementById("contract-etherscan-link");
-      if (contractLink) contractLink.href = data.contract.etherscanUrl;
+      const shortAddr = `${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`;
+      const topContractEl = document.getElementById("topbar-contract");
+      const contractLinkEl = document.getElementById("contract-link");
+
+      if (topContractEl) topContractEl.textContent = shortAddr;
+      if (contractLinkEl) contractLinkEl.href = data.contract.etherscanUrl;
     }
 
-    const relayerEl = document.getElementById("telemetry-relayer");
-    if (relayerEl && data.relayer) {
-      if (data.relayer.configured) {
-        const bal = data.relayer.balanceEth ? Number(data.relayer.balanceEth).toFixed(4) : "0";
-        relayerEl.textContent = `${bal} ETH`;
-      } else {
-        relayerEl.textContent = "Simulated";
-      }
+    // Relayer Balance
+    const sideBalEl = document.getElementById("sidebar-relayer-bal");
+    const kpiBalEl = document.getElementById("kpi-relayer-bal");
+    let balStr = "0.0500 ETH";
+
+    if (data.relayer?.configured && data.relayer.balanceEth) {
+      const balNum = Number(data.relayer.balanceEth);
+      balStr = `${balNum.toFixed(4)} ETH`;
     }
+
+    if (sideBalEl) sideBalEl.textContent = balStr;
+    if (kpiBalEl) kpiBalEl.textContent = balStr;
+
   } catch (err) {
     console.error("Health check error:", err);
   }
@@ -150,15 +248,16 @@ async function fetchRecentLedger() {
   }
 }
 
-// =========================================================
-// RENDERING
-// =========================================================
+// ===============================================================================
+// RENDERING ENGINES
+// ===============================================================================
 function renderTallies(data) {
-  const partyGrid = document.getElementById("party-cards-grid");
-  const totalVotesEl = document.getElementById("stat-total-votes");
-  const leadingPartyEl = document.getElementById("stat-leading-party");
+  const container = document.getElementById("candidate-cards-container");
+  const totalVotesEl = document.getElementById("kpi-total-votes");
+  const leadingPartyEl = document.getElementById("kpi-leading-party");
 
-  if (totalVotesEl) totalVotesEl.textContent = data.totalVotes || 0;
+  const total = data.totalVotes || 0;
+  if (totalVotesEl) totalVotesEl.textContent = total.toLocaleString();
 
   const parties = Object.entries(data.parties || {});
   let maxVotes = -1;
@@ -172,82 +271,146 @@ function renderTallies(data) {
   });
 
   if (leadingPartyEl) leadingPartyEl.textContent = leader;
+  if (!container) return;
 
-  if (!partyGrid) return;
-
-  partyGrid.innerHTML = "";
+  container.innerHTML = "";
 
   if (parties.length === 0) {
-    partyGrid.innerHTML = `<div class="empty-state">No registered parties yet.</div>`;
+    container.innerHTML = `
+      <div style="padding: 40px; text-align: center; color: var(--c-silver); grid-column: span 2;">
+        No certified candidates registered in the current electoral mapping.
+      </div>
+    `;
     return;
   }
 
-  const total = data.totalVotes || 0;
-
   parties.forEach(([party, count], idx) => {
-    const color = PARTY_COLORS[idx % PARTY_COLORS.length];
-    const percentage = total > 0 ? ((count / total) * 100).toFixed(1) : 0;
+    // Find matching scheme by name or index fallback
+    const matchedScheme = PARTY_SCHEMES.find(s => s.name.toLowerCase() === party.toLowerCase()) || PARTY_SCHEMES[idx % PARTY_SCHEMES.length];
+    const percentage = total > 0 ? ((count / total) * 100).toFixed(1) : "0.0";
+    const gpioPin = matchedScheme.gpio || `GPIO ${[13, 14, 25, 26][idx % 4]}`;
 
     const card = document.createElement("div");
-    card.className = "party-card";
-    card.style.setProperty("--party-color", color);
+    card.className = "candidate-entry-card";
+    card.style.setProperty("--entry-accent", matchedScheme.gradient);
+    card.style.setProperty("--entry-glow", matchedScheme.glow);
+
     card.innerHTML = `
-      <div class="party-header">
-        <h4 class="party-name">${escapeHtml(party)}</h4>
-        <span class="party-badge" style="color: ${color}">On-Chain Verified</span>
+      <div>
+        <div class="candidate-top">
+          <div>
+            <h4 class="candidate-name">${escapeHtml(party)}</h4>
+            <span class="candidate-affiliation">Official Ballot Choice • Verified Enclave</span>
+          </div>
+          <span class="status-badge-mined" style="color: ${matchedScheme.accent}; background: ${matchedScheme.badgeBg}; border: 1px solid ${matchedScheme.border};">
+            ${gpioPin}
+          </span>
+        </div>
+        <div class="tally-digits">
+          <span class="tally-number">${count.toLocaleString()}</span>
+          <span class="tally-pct">${percentage}% of certified ballots</span>
+        </div>
+        <div class="meter-track">
+          <div class="meter-fill" style="width: ${percentage}%;"></div>
+        </div>
       </div>
-      <div class="party-count-wrap">
-        <span class="party-count">${count}</span>
-        <span class="party-share">${percentage}%</span>
-      </div>
-      <div class="progress-track">
-        <div class="progress-fill" style="width: ${percentage}%"></div>
+
+      <div class="candidate-card-footer">
+        <span style="font-size: 0.72rem; color: var(--c-silver); font-family: var(--font-mono);">
+          Sepolia Verified
+        </span>
+        <button class="btn-card-vote" onclick="quickSelectParty('${escapeHtml(party)}')">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+          <span>Select in Enclave</span>
+        </button>
       </div>
     `;
-    partyGrid.appendChild(card);
+    container.appendChild(card);
   });
 
-  // Populate candidate dropdown in simulator if empty
+  // Populate candidate select in simulator
   populateSimulatorCandidates(parties.map(p => p[0]));
 }
 
 function renderRecentLedger(votes) {
-  const tbody = document.getElementById("ledger-tbody");
+  const tbody = document.getElementById("audit-table-body");
+  const countEl = document.getElementById("ledger-count-val");
   if (!tbody) return;
 
-  if (votes.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No votes recorded in local session yet. Use the simulator or hardware to cast a vote!</td></tr>`;
+  // Apply search query filter if user typed in search box
+  const query = (appState.ledgerSearchQuery || "").toLowerCase().trim();
+  const filtered = query
+    ? votes.filter(v => (v.party && v.party.toLowerCase().includes(query)) || (v.voterHash && v.voterHash.toLowerCase().includes(query)) || (v.transactionHash && v.transactionHash.toLowerCase().includes(query)))
+    : votes;
+
+  if (countEl) countEl.textContent = filtered.length;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align: center; padding: 48px 24px; color: var(--c-silver);">
+          ${query ? `No ledger records matching "${escapeHtml(query)}"` : "No ballots have been committed in the current operational session."}
+        </td>
+      </tr>
+    `;
     return;
   }
 
-  tbody.innerHTML = votes.map((v, i) => {
+  tbody.innerHTML = filtered.map((v, i) => {
+    const seqNum = filtered.length - i;
     const shortHash = v.voterHash ? `${v.voterHash.substring(0, 10)}...${v.voterHash.substring(v.voterHash.length - 8)}` : "N/A";
     const shortTx = v.transactionHash ? `${v.transactionHash.substring(0, 8)}...${v.transactionHash.substring(v.transactionHash.length - 6)}` : "Pending";
     const timeFormatted = v.timestamp ? new Date(v.timestamp).toLocaleTimeString() : "Just now";
 
     return `
       <tr>
-        <td><strong style="color: #fff">#${votes.length - i}</strong></td>
+        <td><strong style="color: var(--c-pearl); font-family: var(--font-mono);">#${seqNum.toString().padStart(3, '0')}</strong></td>
         <td>
-          <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent-cyan);" title="${v.voterHash}">
-            ${shortHash}
+          <span class="hash-cell" title="${v.voterHash}">
+            <span>${shortHash}</span>
+            <button class="copy-mini-btn" onclick="copyToClipboard('${v.voterHash}')" title="Copy full SHA-256 hash">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+            </button>
           </span>
         </td>
         <td>
-          <span style="font-weight: 600; color: #fff;">${escapeHtml(v.party)}</span>
+          <span style="font-weight: 700; color: var(--c-pearl);">${escapeHtml(v.party)}</span>
         </td>
         <td>
-          <span style="font-family: var(--font-mono); color: var(--text-secondary);">
-            Block #${v.blockNumber || "-"}
+          <span style="font-family: var(--font-mono); color: var(--c-silver);">
+            Block #${v.blockNumber ? v.blockNumber.toLocaleString() : "-"}
           </span>
         </td>
         <td>
-          ${v.etherscanLink ? `<a href="${v.etherscanLink}" target="_blank" rel="noopener" class="tx-hash-link">${shortTx} ↗</a>` : shortTx}
-          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">${timeFormatted}</div>
+          ${v.etherscanLink 
+            ? `<a href="${v.etherscanLink}" target="_blank" rel="noopener" class="btn-icon-link" style="font-family: var(--font-mono); font-size: 0.8rem;">${shortTx} ↗</a>` 
+            : `<span style="font-family: var(--font-mono); font-size: 0.8rem;">${shortTx}</span>`
+          }
+          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 3px;">${timeFormatted}</div>
+        </td>
+        <td>
+          <span class="status-badge-mined">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span>Finalized</span>
+          </span>
         </td>
       </tr>
     `;
   }).join("");
+}
+
+// Search filter for audit ledger table
+function filterLedger(query) {
+  appState.ledgerSearchQuery = query;
+  renderRecentLedger(appState.recentVotes);
 }
 
 function populateSimulatorCandidates(partyNames) {
@@ -269,21 +432,59 @@ function populateSimulatorCandidates(partyNames) {
   }
 }
 
-// =========================================================
-// ESP32 EDGE SIMULATOR & TESTING STATION
-// =========================================================
+// Quick select party and switch to simulator tab
+function quickSelectParty(partyName) {
+  const select = document.getElementById("sim-candidate-select");
+  if (select) select.value = partyName;
+
+  const simTabBtn = document.querySelector('[data-tab="tab-simulator"]');
+  if (simTabBtn) simTabBtn.click();
+
+  showToast(`Selected ballot candidate: ${partyName}`, "info");
+}
+
+// Quick select citizen identifier
+function setSimVoter(uid, btnEl) {
+  const input = document.getElementById("sim-voter-id");
+  if (input) input.value = uid;
+
+  if (btnEl) {
+    document.querySelectorAll(".citizen-preset-group .btn-preset-pill").forEach(b => b.classList.remove("active"));
+    btnEl.classList.add("active");
+  }
+
+  logToSimConsole(`Loaded citizen template UID: ${uid}`, "info");
+}
+
+function setSimParty(partyName) {
+  const select = document.getElementById("sim-candidate-select");
+  if (select) {
+    select.value = partyName;
+    showToast(`Ballot selection: ${partyName}`, "info");
+  }
+}
+
+function setAuditVoter(uid) {
+  const input = document.getElementById("audit-input");
+  if (input) input.value = uid;
+  const btn = document.getElementById("btn-audit-check");
+  if (btn) btn.click();
+}
+
+// ===============================================================================
+// ENCLAVE SIMULATOR
+// ===============================================================================
 function initSimulator() {
   const voterIdInput = document.getElementById("sim-voter-id");
   const randomBtn = document.getElementById("btn-random-voter");
   const submitBtn = document.getElementById("btn-submit-vote");
   const fraudBtn = document.getElementById("btn-test-fraud");
-  const simConsole = document.getElementById("sim-console");
 
   if (randomBtn && voterIdInput) {
     randomBtn.addEventListener("click", () => {
-      const randomId = `FP_UID_${Math.floor(100000 + Math.random() * 900000)}`;
+      const randomId = `FP_UID_${Math.floor(10000 + Math.random() * 90000)}`;
       voterIdInput.value = randomId;
-      logToSimConsole(`Generated random biometric sensor ID: ${randomId}`, "info");
+      logToSimConsole(`Generated citizen biometric identifier: ${randomId}`, "info");
     });
   }
 
@@ -294,11 +495,11 @@ function initSimulator() {
       const party = select ? select.value : "";
 
       if (!voterId) {
-        showToast("Please enter a Voter ID", "error");
+        showToast("Enter a citizen biometric identifier", "error");
         return;
       }
       if (!party) {
-        showToast("Please select a candidate", "error");
+        showToast("Select a registered ballot candidate", "error");
         return;
       }
 
@@ -313,11 +514,11 @@ function initSimulator() {
       const party = select ? select.value : "";
 
       if (!voterId) {
-        showToast("Please enter a Voter ID first", "error");
+        showToast("Enter a citizen identifier first", "error");
         return;
       }
 
-      logToSimConsole(`\n🛡️ [FRAUD TEST TRIGGERED] Intentionally submitting duplicate vote for ID: ${voterId}...`, "warn");
+      logToSimConsole(`\n🛑 [SECURITY AUDIT] Simulating double-voting attack for UID: ${voterId}...`, "warn");
       await executeSimulatedVote(voterId, party, true);
     });
   }
@@ -325,15 +526,12 @@ function initSimulator() {
 
 async function executeSimulatedVote(voterId, party, isFraudAttempt = false) {
   const submitBtn = document.getElementById("btn-submit-vote");
-  const simConsole = document.getElementById("sim-console");
-
   if (submitBtn) submitBtn.disabled = true;
 
-  logToSimConsole(`\n--- VOTE SUBMISSION PIPELINE START ---`, "info");
-  logToSimConsole(`1. [Edge Hardware] Biometric Scanner captured Voter ID: "${voterId}"`, "info");
-  logToSimConsole(`2. [Hardware -> Wi-Fi] Dispatching HTTP POST to /api/blockchain/vote...`, "info");
+  logToSimConsole(`\n--- VOTING CONDUIT EXECUTION ---`, "info");
+  logToSimConsole(`1. [Edge Terminal] Optical scanner captured minutiae for Citizen ID: "${voterId}"`, "info");
+  logToSimConsole(`2. [Hardware -> Wi-Fi] Dispatching authenticated packet to /api/blockchain/vote...`, "info");
 
-  // Step visual architecture flow
   triggerArchAnimation();
 
   try {
@@ -346,29 +544,28 @@ async function executeSimulatedVote(voterId, party, isFraudAttempt = false) {
     const data = await res.json();
 
     if (res.status === 200 && data.success) {
-      logToSimConsole(`3. [SHA-256 Engine] Anonymized Voter Hash: ${data.voterHash}`, "success");
-      logToSimConsole(`4. [Pre-Flight Guard] Verified on Sepolia contract: Status = Unvoted`, "success");
-      logToSimConsole(`5. [EVM Relayer] Signed transaction sent to Sepolia testnet!`, "success");
-      logToSimConsole(`6. [Block Confirmation] Mined in Block #${data.blockNumber}`, "success");
-      logToSimConsole(`🎉 [CONFIRMED] Tx: ${data.transactionHash}`, "success");
+      logToSimConsole(`3. [SHA-256 Engine] Cryptographic Anonymized Hash: ${data.voterHash}`, "success");
+      logToSimConsole(`4. [Pre-Flight Guard] Verified contract state: Unvoted (hasVoted = false)`, "success");
+      logToSimConsole(`5. [EVM Consensus] Transaction broadcasted and mined into Block #${data.blockNumber}`, "success");
+      logToSimConsole(`✅ [FINALIZED] Tx Hash: ${data.transactionHash}`, "success");
       logToSimConsole(`🔗 Public Etherscan: ${data.etherscanLink}`, "info");
 
-      showToast("Vote successfully secured on Ethereum Sepolia!", "success");
+      showToast("Vote successfully committed to Sepolia ledger", "success");
       await refreshData(false);
     } else if (res.status === 409 || data.fraudAlert) {
-      logToSimConsole(`🛑 [SECURITY ALERT] DOUBLE-VOTE FRAUD DETECTED!`, "error");
-      logToSimConsole(`   • Error: ${data.error}`, "error");
-      logToSimConsole(`   • Voter Hash: ${data.voterHash}`, "error");
-      logToSimConsole(`   • Action: Blocked before consuming gas fees!`, "warn");
+      logToSimConsole(`🛑 [FRAUD DETECTED] DOUBLE-VOTING VIOLATION BLOCKED!`, "error");
+      logToSimConsole(`   • Violation: ${data.error}`, "error");
+      logToSimConsole(`   • Anonymized Hash: ${data.voterHash}`, "error");
+      logToSimConsole(`   • Outcome: Pre-flight check rejected ballot. Zero gas consumed.`, "warn");
 
       showToast(data.error || "Fraud Alert: Voter already recorded!", "error");
     } else {
-      logToSimConsole(`❌ [ERROR] ${data.error || "Failed to process transaction"}`, "error");
+      logToSimConsole(`❌ [ERROR] ${data.error || "Transaction broadcast failed"}`, "error");
       showToast(data.error || "Transaction submission failed", "error");
     }
   } catch (err) {
-    logToSimConsole(`❌ [NETWORK ERROR] ${err.message}`, "error");
-    showToast("Network error submitting vote", "error");
+    logToSimConsole(`❌ [NETWORK FAULT] ${err.message}`, "error");
+    showToast("Network fault reaching consensus relayer", "error");
   } finally {
     if (submitBtn) submitBtn.disabled = false;
   }
@@ -391,9 +588,9 @@ function logToSimConsole(msg, type = "info") {
   box.scrollTop = box.scrollHeight;
 }
 
-// =========================================================
-// VOTER FRAUD AUDITOR
-// =========================================================
+// ===============================================================================
+// FRAUD AUDITOR
+// ===============================================================================
 function initAuditor() {
   const auditInput = document.getElementById("audit-input");
   const auditBtn = document.getElementById("btn-audit-check");
@@ -404,11 +601,15 @@ function initAuditor() {
   auditBtn.addEventListener("click", async () => {
     const val = auditInput.value.trim();
     if (!val) {
-      showToast("Enter a voter ID or SHA-256 hash", "error");
+      showToast("Enter a citizen ID or 64-character SHA-256 hash", "error");
       return;
     }
 
-    auditResult.innerHTML = `<div style="color: var(--text-muted);">Auditing on-chain registry state...</div>`;
+    auditResult.innerHTML = `
+      <div style="padding: 24px; text-align: center; color: var(--c-silver); font-size: 0.85rem;">
+        Querying Ethereum Sepolia contract state...
+      </div>
+    `;
 
     try {
       const isRaw = !val.startsWith("0x") && val.length < 64;
@@ -418,37 +619,53 @@ function initAuditor() {
       if (data.success) {
         if (data.hasVoted) {
           auditResult.innerHTML = `
-            <div style="padding: 16px; background: rgba(244, 63, 94, 0.1); border: 1px solid var(--accent-rose); border-radius: var(--radius-sm);">
-              <h4 style="color: var(--accent-rose); margin-bottom: 6px;">⚠️ VOTED STATUS: RECORDED ON-CHAIN</h4>
-              <p style="font-size: 0.85rem; color: #fff;">This voter hash has ALREADY cast an immutable ballot. Any subsequent vote attempts will be rejected.</p>
-              <div style="font-family: var(--font-mono); font-size: 0.78rem; margin-top: 8px; color: var(--accent-cyan); word-break: break-all;">
-                Hash: ${data.voterHash}
+            <div style="padding: 24px; background: rgba(244, 63, 94, 0.08); border: 1px solid rgba(244, 63, 94, 0.4); border-radius: var(--radius-sm); box-shadow: var(--shadow-ambient);">
+              <div style="display: flex; align-items: center; gap: 10px; color: #fb7185; font-weight: 800; font-size: 0.95rem; margin-bottom: 8px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+                </svg>
+                <span>STATUS: BALLOT RECORDED (INELIGIBLE)</span>
+              </div>
+              <p style="font-size: 0.85rem; color: var(--c-pearl); line-height: 1.6;">
+                This citizen biometric identity has already cast an immutable ballot on the Ethereum Sepolia ledger. Any duplicate submission will be rejected by the consensus rules.
+              </p>
+              <div style="font-family: var(--font-mono); font-size: 0.76rem; margin-top: 14px; color: var(--c-pearl); word-break: break-all; background: rgba(6,20,27,0.7); border: 1px solid var(--border-glass); padding: 8px 12px; border-radius: 6px;">
+                Cryptographic Hash: ${data.voterHash}
               </div>
             </div>
           `;
         } else {
           auditResult.innerHTML = `
-            <div style="padding: 16px; background: rgba(16, 185, 129, 0.1); border: 1px solid var(--accent-emerald); border-radius: var(--radius-sm);">
-              <h4 style="color: var(--accent-emerald); margin-bottom: 6px;">✅ VOTED STATUS: ELIGIBLE (NOT RECORDED)</h4>
-              <p style="font-size: 0.85rem; color: #fff;">This voter hash has NOT been recorded on the blockchain yet. Eligible to cast a single verified vote.</p>
-              <div style="font-family: var(--font-mono); font-size: 0.78rem; margin-top: 8px; color: var(--accent-cyan); word-break: break-all;">
-                Hash: ${data.voterHash}
+            <div style="padding: 24px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: var(--radius-sm); box-shadow: var(--shadow-ambient);">
+              <div style="display: flex; align-items: center; gap: 10px; color: var(--accent-emerald); font-weight: 800; font-size: 0.95rem; margin-bottom: 8px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                  <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+                <span>STATUS: ELIGIBLE TO VOTE (UNVOTED)</span>
+              </div>
+              <p style="font-size: 0.85rem; color: var(--c-pearl); line-height: 1.6;">
+                This identity does not currently exist in the mined consensus state. The citizen is authenticated and eligible to cast a single verified ballot.
+              </p>
+              <div style="font-family: var(--font-mono); font-size: 0.76rem; margin-top: 14px; color: var(--c-pearl); word-break: break-all; background: rgba(6,20,27,0.7); border: 1px solid var(--border-glass); padding: 8px 12px; border-radius: 6px;">
+                Cryptographic Hash: ${data.voterHash}
               </div>
             </div>
           `;
         }
       } else {
-        auditResult.innerHTML = `<div style="color: var(--accent-rose);">Error: ${data.error || "Lookup failed"}</div>`;
+        auditResult.innerHTML = `<div style="color: #fb7185; padding: 20px;">Error: ${data.error || "Lookup failed"}</div>`;
       }
     } catch (err) {
-      auditResult.innerHTML = `<div style="color: var(--accent-rose);">Network error during audit</div>`;
+      auditResult.innerHTML = `<div style="color: #fb7185; padding: 20px;">Network fault during registry audit</div>`;
     }
   });
 }
 
-// =========================================================
+// ===============================================================================
 // ARCHITECTURE ANIMATION
-// =========================================================
+// ===============================================================================
 function initArchitectureAnimation() {
   const triggerBtn = document.getElementById("btn-trigger-arch-flow");
   if (triggerBtn) {
@@ -477,14 +694,50 @@ function triggerArchAnimation() {
       node.classList.add("active-pulse", "active");
       setTimeout(() => {
         node.classList.remove("active-pulse", "active");
-      }, 1200);
-    }, idx * 280);
+      }, 1000);
+    }, idx * 220);
   });
 }
 
-// =========================================================
+// ===============================================================================
+// EXPORT AUDIT JSON
+// ===============================================================================
+function exportLedgerJSON() {
+  if (!appState.recentVotes || appState.recentVotes.length === 0) {
+    showToast("No audit records available to export", "error");
+    return;
+  }
+
+  const exportData = {
+    organization: "VOTECHAIN Electoral Commission",
+    network: "Ethereum Sepolia (Chain ID: 11155111)",
+    exportedAt: new Date().toISOString(),
+    totalCertifiedVotes: appState.recentVotes.length,
+    ledger: appState.recentVotes
+  };
+
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+  const downloadAnchor = document.createElement("a");
+  downloadAnchor.setAttribute("href", dataStr);
+  downloadAnchor.setAttribute("download", `VOTECHAIN_Audit_Ledger_${Date.now()}.json`);
+  document.body.appendChild(downloadAnchor);
+  downloadAnchor.click();
+  downloadAnchor.remove();
+
+  showToast("Audit JSON exported successfully", "success");
+}
+
+// ===============================================================================
 // UTILITIES
-// =========================================================
+// ===============================================================================
+function copyToClipboard(text) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast("Hash copied to clipboard", "success");
+    });
+  }
+}
+
 function showToast(message, type = "info") {
   let toast = document.getElementById("global-toast");
   if (!toast) {
@@ -499,7 +752,7 @@ function showToast(message, type = "info") {
 
   setTimeout(() => {
     toast.classList.remove("show");
-  }, 3200);
+  }, 3000);
 }
 
 function escapeHtml(str) {

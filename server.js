@@ -20,7 +20,7 @@ const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS || "0xa899b0F862277c2a8b55
 const VOTER_HASH_SALT = process.env.VOTER_HASH_SALT || "Election2026";
 
 // Known default political parties/candidates
-const DEFAULT_PARTIES = ["Democracy Forward", "Alliance for Progress", "Liberty Coalition", "Green Earth Party"];
+const DEFAULT_PARTIES = ["BJP", "UBT", "Congress", "AIMIM"];
 
 // Backwards-compatible ABI definition
 const CONTRACT_ABI = [
@@ -85,12 +85,23 @@ DEFAULT_PARTIES.forEach(p => simulatedPartyTallies[p] = 0);
 // =========================================================
 // BLOCKCHAIN PROVIDER & WALLET SETUP
 // =========================================================
+
 let provider;
 let wallet;
 let contract;
 let isWalletConfigured = false;
 let isContractDeployed = false;
 let walletBalanceEth = "0.0";
+
+// High-Performance RPC & Telemetry Cache (Protects against Sepolia rate-limiting)
+let cachedBlockNumber = null;
+let cachedLatencyMs = null;
+let lastHealthFetchTime = 0;
+const HEALTH_CACHE_TTL_MS = 6000; // 6s TTL for block/latency
+
+let cachedTallies = null;
+let lastTalliesFetchTime = 0;
+const TALLIES_CACHE_TTL_MS = 4000; // 4s TTL for election tallies
 
 async function setupBlockchain() {
   try {
@@ -177,12 +188,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// Structured request logger
+// Structured request logger (Logs write operations and errors; suppresses noisy dashboard polling)
 app.use((req, res, next) => {
   const start = Date.now();
   res.on("finish", () => {
     const duration = Date.now() - start;
-    if (req.path.startsWith("/api/")) {
+    const isRoutinePoll = req.method === "GET" && (req.path === "/api/health" || req.path === "/api/blockchain/recent");
+    if (req.path.startsWith("/api/") && (!isRoutinePoll || res.statusCode >= 400)) {
       console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} -> ${res.statusCode} (${duration}ms)`);
     }
   });
@@ -302,11 +314,12 @@ app.post("/api/blockchain/vote", async (req, res) => {
 
     recentVotes.unshift(voteRecord);
     if (recentVotes.length > MAX_RECENT_LOGS) recentVotes.pop();
+    lastTalliesFetchTime = 0; // Instantly invalidate tallies cache so fresh results reflect immediately
 
     return res.status(200).json({
       success: true,
-      message: canBroadcastOnChain 
-        ? "Vote permanently secured on Ethereum Sepolia ledger!" 
+      message: canBroadcastOnChain
+        ? "Vote permanently secured on Ethereum Sepolia ledger!"
         : "Vote verified & recorded in biometric consensus pipeline (Simulation Mode).",
       voterHash,
       party: candidateParty,
@@ -332,6 +345,11 @@ app.post("/api/blockchain/vote", async (req, res) => {
  */
 app.get("/api/blockchain/votes", async (req, res) => {
   try {
+    const now = Date.now();
+    if (cachedTallies && (now - lastTalliesFetchTime < TALLIES_CACHE_TTL_MS)) {
+      return res.status(200).json(cachedTallies);
+    }
+
     let partyList = Array.from(activeParties);
     const tallies = {};
     let totalVotes = 0;
@@ -358,14 +376,17 @@ app.get("/api/blockchain/votes", async (req, res) => {
       });
     }
 
-    return res.status(200).json({
+    cachedTallies = {
       success: true,
       totalVotes,
       parties: tallies,
       contractAddress: CONTRACT_ADDRESS,
       network: "Ethereum Sepolia",
       isContractDeployed
-    });
+    };
+    lastTalliesFetchTime = now;
+
+    return res.status(200).json(cachedTallies);
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
@@ -465,17 +486,21 @@ app.get("/api/blockchain/recent", (req, res) => {
  */
 app.get("/api/health", async (req, res) => {
   try {
-    let blockNumber = null;
-    let latencyMs = null;
+    const now = Date.now();
+    if (provider && (now - lastHealthFetchTime > HEALTH_CACHE_TTL_MS || cachedBlockNumber === null)) {
+      try {
+        const start = Date.now();
+        cachedBlockNumber = await provider.getBlockNumber();
+        cachedLatencyMs = Date.now() - start;
 
-    if (provider) {
-      const start = Date.now();
-      blockNumber = await provider.getBlockNumber();
-      latencyMs = Date.now() - start;
-
-      if (wallet) {
-        const bal = await provider.getBalance(wallet.address);
-        walletBalanceEth = ethers.formatEther(bal);
+        if (wallet) {
+          const bal = await provider.getBalance(wallet.address);
+          walletBalanceEth = ethers.formatEther(bal);
+        }
+        lastHealthFetchTime = now;
+      } catch (rpcErr) {
+        // Retain last known telemetry values on transient RPC glitches
+        console.warn("⚠️ RPC telemetry refresh warning:", rpcErr.message);
       }
     }
 
@@ -487,8 +512,8 @@ app.get("/api/health", async (req, res) => {
         name: "Ethereum Sepolia",
         chainId: 11155111,
         rpcUrl: PRIMARY_RPC,
-        blockNumber,
-        latencyMs
+        blockNumber: cachedBlockNumber,
+        latencyMs: cachedLatencyMs
       },
       contract: {
         address: CONTRACT_ADDRESS,
@@ -532,7 +557,7 @@ app.use((req, res) => {
 // =========================================================
 // START SERVER
 // =========================================================
-app.listen(PORT, "0.0.0.0", () => {
+const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n======================================================`);
   console.log(`🚀 BIOMETRIC BLOCKCHAIN VOTING RELAY ACTIVE`);
   console.log(`📡 Listening on      : http://0.0.0.0:${PORT}`);
@@ -541,4 +566,13 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Network           : Ethereum Sepolia Testnet`);
   console.log(`⚙️  Operating Mode    : ${isContractDeployed ? "ON_CHAIN_LIVE" : "HYBRID SIMULATION"}`);
   console.log(`======================================================\n`);
+});
+
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`\n❌ Error: Port ${PORT} is already in use by another process.`);
+    console.error(`👉 Stop the existing process running on port ${PORT} or change PORT in .env.\n`);
+  } else {
+    console.error(`\n❌ Server error:`, err.message);
+  }
 });

@@ -49,28 +49,30 @@ The ESP32 firmware is located in [`esp32/hardware.ino`](esp32/hardware.ino).
 | | GND | GND | Ground |
 | | SDA | **GPIO 21** | I2C Data |
 | | SCL | **GPIO 22** | I2C Clock |
-| **Party A Button** | Terminal 1 | **GPIO 13** | Configured as `INPUT_PULLUP` (Democracy Forward) |
+| **Party A Button** | Terminal 1 | **GPIO 13** | Configured as `INPUT` (BJP) |
 | | Terminal 2 | GND | Connect to Ground |
-| **Party B Button** | Terminal 1 | **GPIO 14** | Configured as `INPUT_PULLUP` (Alliance for Progress) |
+| **Party B Button** | Terminal 1 | **GPIO 14** | Configured as `INPUT` (UBT) |
 | | Terminal 2 | GND | Connect to Ground |
-| **Party C Button** | Terminal 1 | **GPIO 25** | Configured as `INPUT_PULLUP` (Liberty Coalition) |
+| **Party C Button** | Terminal 1 | **GPIO 25** | Configured as `INPUT` (Congress) |
 | | Terminal 2 | GND | Connect to Ground |
-| **Party D Button** | Terminal 1 | **GPIO 26** | Configured as `INPUT_PULLUP` (Green Earth Party) |
+| **Party D Button** | Terminal 1 | **GPIO 26** | Configured as `INPUT` (AIMIM) |
 | | Terminal 2 | GND | Connect to Ground |
 | **Results Button** | Terminal 1 | **GPIO 27** | Configured as `INPUT_PULLUP` (Inspect Results) |
+| | Terminal 2 | GND | Connect to Ground |
+| **Enroll Voter Button** | Terminal 1 | **GPIO 32** | Configured as `INPUT_PULLUP` (Register New Citizen) |
 | | Terminal 2 | GND | Connect to Ground |
 | **Active Buzzer** | Positive (+) | **GPIO 33** | Audio Feedback |
 | | Negative (-) | GND | Ground |
 
 ### Configuring the ESP32 Code
-Open [`esp32/hardware.ino`](esp32/hardware.ino) in the Arduino IDE and update lines 45-53:
+Open [`esp32/hardware/hardware.ino`](esp32/hardware/hardware.ino) in the Arduino IDE and configure Section 2:
 ```cpp
 const char* WIFI_SSID     = "YOUR_WIFI_SSID";
 const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
-// Use your computer's local Wi-Fi IPv4 address (e.g. from ipconfig):
-String SERVER_VOTE_URL    = "http://10.191.114.167:3000/api/blockchain/vote";
-String SERVER_RESULTS_URL = "http://10.191.114.167:3000/api/blockchain/votes";
+// Update ONLY this IP to your computer's local Wi-Fi IPv4 address (from 'ipconfig'):
+const char* SERVER_IP     = "10.62.75.167";
+const int   SERVER_PORT   = 3000;
 ```
 
 ### Arduino IDE Libraries Required:

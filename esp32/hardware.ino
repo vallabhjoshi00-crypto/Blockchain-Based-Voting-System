@@ -1,22 +1,22 @@
 /**
- * ===============================================================================
- * BIOMETRIC BLOCKCHAIN VOTING SYSTEM - ESP32 FIRMWARE
- * ===============================================================================
- * Hardware:
- *   - ESP32 NodeMCU / DevKit
- *   - R307 Optical Fingerprint Sensor (UART Serial2: TX=17, RX=16)
- *   - 16x2 I2C LCD Display (SDA=21, SCL=22)
- *   - 4 Push Buttons for Ballot Selection (GPIO 13, 14, 25, 26)
- *   - 1 Push Button for Certified Results (GPIO 27)
- *   - 1 Active Buzzer for Audio Feedback (GPIO 33)
- *
- * Web3 Blockchain Integration:
- *   - Connects to local Wi-Fi and dispatches verified votes to the Node.js
- *     Web3 Relayer (server.js) at /api/blockchain/vote.
- *   - Node.js converts voterID into an anonymized SHA-256 hash and records
- *     the immutable vote onto the Ethereum Sepolia smart contract.
- *   - If Wi-Fi is unavailable, the firmware gracefully operates in Standalone
- *     Offline Mode.
+ ===============================================================================
+ BIOMETRIC BLOCKCHAIN VOTING SYSTEM - ESP32 FIRMWARE
+ ===============================================================================
+ Hardware:
+   - ESP32 NodeMCU / DevKit
+   - R307 Optical Fingerprint Sensor (UART Serial2: TX=17, RX=16)
+   - 16x2 I2C LCD Display (SDA=21, SCL=22)
+   - 4 Push Buttons for Ballot Selection (GPIO 13, 14, 25, 26)
+   - 1 Push Button for Certified Results (GPIO 27)
+   - 1 Active Buzzer for Audio Feedback (GPIO 33)
+
+ Web3 Blockchain Integration:
+   - Connects to local Wi-Fi and dispatches verified votes to the Node.js
+     Web3 Relayer (server.js) at /api/blockchain/vote.
+   - Node.js converts voterID into an anonymized SHA-256 hash and records
+     the immutable vote onto the Ethereum Sepolia smart contract.
+   - If Wi-Fi is unavailable, the firmware gracefully operates in Standalone
+     Offline Mode.
  * ===============================================================================
  */
 
@@ -27,14 +27,27 @@
 #include <HTTPClient.h>
 
 // ===============================================================================
-// 1. PIN DEFINITIONS
+// 1. PIN DEFINITIONS & TOUCH SENSOR CONFIGURATION
 // ===============================================================================
-#define BTN_PARTY_A 13
-#define BTN_PARTY_B 14
-#define BTN_PARTY_C 25
-#define BTN_PARTY_D 26
-#define BTN_RESULT  27
-#define BUZZER_PIN  33
+#define TOUCH_PARTY_A 13
+#define TOUCH_PARTY_B 14
+#define TOUCH_PARTY_C 25
+#define TOUCH_PARTY_D 26
+#define TOUCH_RESULT  27
+#define BTN_ENROLL    32 // Push Button (GPIO 32 to GND) to Register / Enroll New Voter
+#define BUZZER_PIN    33
+
+// Touch Sensor Trigger Logic:
+// Standard digital capacitive touch modules (e.g., TTP223) output HIGH on touch.
+// If your touch sensors output LOW on touch, change this to LOW.
+#define TOUCH_ACTIVE  HIGH
+
+// Backward-compatibility aliases
+#define BTN_PARTY_A   TOUCH_PARTY_A
+#define BTN_PARTY_B   TOUCH_PARTY_B
+#define BTN_PARTY_C   TOUCH_PARTY_C
+#define BTN_PARTY_D   TOUCH_PARTY_D
+#define BTN_RESULT    TOUCH_RESULT
 
 // Fingerprint Sensor Serial Pins (Hardware Serial 2)
 #define FP_RX_PIN 16 // Connect to Sensor TX
@@ -44,14 +57,24 @@
 // 2. NETWORK & SERVER CONFIGURATION
 // ===============================================================================
 // Replace with your Wi-Fi credentials:
-const char* WIFI_SSID     = "YOUR_WIFI_SSID";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+const char* WIFI_SSID     = "Vivo t2x";
+const char* WIFI_PASSWORD = "11111111";
 
-// IP Address and Port of your Node.js server (server.js)
-// NOTE: Set this to the IPv4 address of the computer running 'node server.js'
-// Example: "http://10.191.114.167:3000/api/blockchain/vote"
-String SERVER_VOTE_URL    = "http://10.191.114.167:3000/api/blockchain/vote";
-String SERVER_RESULTS_URL = "http://10.191.114.167:3000/api/blockchain/votes";
+// ===============================================================================
+// DYNAMIC SERVER HOST CONFIGURATION
+// When your computer's IP address changes (e.g., new Wi-Fi / Hotspot):
+// -> UPDATE ONLY THIS ONE VARIABLE BELOW:
+// ===============================================================================
+const char* SERVER_IP     = "10.118.241.167"; // <-- Current Hotspot Wi-Fi IP
+const int   SERVER_PORT   = 3000;           // Port of node server.js
+
+// Dynamic API endpoints automatically constructed from SERVER_IP and SERVER_PORT
+#define ENDPOINT_VOTE    "/api/blockchain/vote"
+#define ENDPOINT_RESULTS "/api/blockchain/votes"
+
+String SERVER_BASE_URL    = String("http://") + SERVER_IP + ":" + SERVER_PORT;
+String SERVER_VOTE_URL    = SERVER_BASE_URL + ENDPOINT_VOTE;
+String SERVER_RESULTS_URL = SERVER_BASE_URL + ENDPOINT_RESULTS;
 
 // Timeout settings
 const unsigned long VOTE_TIMEOUT_MS = 25000; // 25s timeout waiting for party button
@@ -60,18 +83,21 @@ const int HTTP_TIMEOUT_MS           = 8000;  // 8s timeout for Web3 blockchain b
 // ===============================================================================
 // 3. HARDWARE & STATE INSTANCES
 // ===============================================================================
-// LCD Display (Default I2C Address 0x27, 16 columns, 2 rows)
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+// LCD Display instances for both standard I2C addresses (0x27 for PCF8574, 0x3F for PCF8574A)
+LiquidCrystal_I2C lcd27(0x27, 16, 2);
+LiquidCrystal_I2C lcd3F(0x3F, 16, 2);
+LiquidCrystal_I2C* pLcd = &lcd27;
+#define lcd (*pLcd)
 
 // Hardware Serial 2 for R307 Fingerprint Sensor
 HardwareSerial fpSerial(2);
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&fpSerial);
 
 // Candidate party names (matching both UI and blockchain smart contract)
-const char* PARTY_A_NAME = "Democracy Forward";
-const char* PARTY_B_NAME = "Alliance for Progress";
-const char* PARTY_C_NAME = "Liberty Coalition";
-const char* PARTY_D_NAME = "Green Earth Party";
+const char* PARTY_A_NAME = "BJP";
+const char* PARTY_B_NAME = "UBT";
+const char* PARTY_C_NAME = "Congress";
+const char* PARTY_D_NAME = "AIMIM";
 
 // Local backup vote counters
 int localVotesA = 0;
@@ -86,7 +112,7 @@ bool hasVotedLocal[MAX_LOCAL_VOTERS] = {false};
 bool isWifiConnected = false;
 
 // ===============================================================================
-// 4. FUNCTION DECLARATIONS
+// 4. FUNCTION DECLARATIONS & AUDIO TONE ENGINE
 // ===============================================================================
 void setupWifi();
 void promptScan();
@@ -95,6 +121,19 @@ void takeVote(int id, String name);
 int checkFingerprint();
 bool broadcastVoteToBlockchain(String voterId, String party);
 void fetchAndShowResults();
+int enrollFingerprint(int id);
+int getNextAvailableID();
+
+// Distinct Audio Tone Signatures for Every Action
+void soundBootReady();
+void soundFingerMatched();
+void soundFingerRejected();
+void soundPartySelected();
+void soundVoteSecured();
+void soundVoteOffline();
+void soundFraudAlarm();
+void soundTimeout();
+void soundTallyClick();
 void beepShort();
 void beepDouble();
 void longBeep();
@@ -109,22 +148,68 @@ void setup() {
   Serial.println("🗳️  ESP32 BIOMETRIC WEB3 BLOCKCHAIN VOTING TERMINAL");
   Serial.println("========================================================");
 
-  // 1. Initialize GPIO Pins
-  Serial.println("1. Initializing Button Pins & Buzzer...");
-  pinMode(BTN_PARTY_A, INPUT_PULLUP);
-  pinMode(BTN_PARTY_B, INPUT_PULLUP);
-  pinMode(BTN_PARTY_C, INPUT_PULLUP);
-  pinMode(BTN_PARTY_D, INPUT_PULLUP);
-  pinMode(BTN_RESULT,  INPUT_PULLUP);
-  pinMode(BUZZER_PIN,  OUTPUT);
+  // Initialize dynamic endpoint URLs from SERVER_IP and SERVER_PORT
+  SERVER_BASE_URL    = String("http://") + SERVER_IP + ":" + SERVER_PORT;
+  SERVER_VOTE_URL    = SERVER_BASE_URL + ENDPOINT_VOTE;
+  SERVER_RESULTS_URL = SERVER_BASE_URL + ENDPOINT_RESULTS;
+  Serial.print("Target Server Host: ");
+  Serial.println(SERVER_BASE_URL);
+
+  // 1. Initialize GPIO Pins (Capacitive Touch Sensors & Buzzer)
+  Serial.println("1. Initializing Touch Sensor Pins & Buzzer...");
+  pinMode(TOUCH_PARTY_A, INPUT);
+  pinMode(TOUCH_PARTY_B, INPUT);
+  pinMode(TOUCH_PARTY_C, INPUT);
+  pinMode(TOUCH_PARTY_D, INPUT);
+  pinMode(TOUCH_RESULT,  INPUT);
+  pinMode(BTN_ENROLL,    INPUT_PULLUP); // Dedicated push button to enroll new voter
+  pinMode(BUZZER_PIN,    OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
 
-  // 2. Initialize I2C Bus and LCD
-  Serial.println("2. Initializing 16x2 I2C LCD Display...");
+  // 2. Initialize I2C Bus and Auto-detect LCD
+  Serial.println("2. Initializing 16x2 I2C LCD Display (SDA=21, SCL=22)...");
   Wire.begin(21, 22); // Explicit SDA=21, SCL=22 for ESP32
-  
-  // Compatible LCD initialization for Arduino-LiquidCrystal-I2C library
+  delay(100);
+
+  byte detectedAddr = 0;
+  Serial.print("-> Scanning I2C bus: ");
+  for (byte addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.print("0x");
+      if (addr < 16) Serial.print("0");
+      Serial.print(addr, HEX);
+      Serial.print(" ");
+      if (addr == 0x27 || addr == 0x3F || detectedAddr == 0) {
+        detectedAddr = addr;
+      }
+    }
+  }
+  Serial.println();
+
+  if (detectedAddr == 0x27) {
+    pLcd = &lcd27;
+    Serial.println("-> [LCD SUCCESS] Found and bound to 16x2 I2C Display at 0x27!");
+  } else if (detectedAddr == 0x3F) {
+    pLcd = &lcd3F;
+    Serial.println("-> [LCD SUCCESS] Found and bound to 16x2 I2C Display at 0x3F!");
+  } else if (detectedAddr != 0) {
+    Serial.print("-> [LCD SUCCESS] Found device at 0x");
+    Serial.print(detectedAddr, HEX);
+    Serial.println(", initializing LCD at this address...");
+    pLcd = new LiquidCrystal_I2C(detectedAddr, 16, 2);
+  } else {
+    Serial.println("⚠️ [LCD WARNING] ZERO I2C devices detected on SDA=21, SCL=22!");
+    Serial.println("   Please check:");
+    Serial.println("   1. VCC pin MUST be connected to 5V / VIN (NOT 3.3V)");
+    Serial.println("   2. GND connected to GND");
+    Serial.println("   3. SDA connected to GPIO 21");
+    Serial.println("   4. SCL connected to GPIO 22");
+    pLcd = &lcd27;
+  }
+
   lcd.begin();
+  Wire.begin(21, 22); // Ensure pins remain locked to 21/22
   lcd.backlight();
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -156,14 +241,14 @@ void setup() {
     lcd.print("Sensor NOT Found");
     lcd.setCursor(0, 1);
     lcd.print("Check Wiring!");
-    longBeep();
+    soundFraudAlarm();
     while (1) {
       delay(500);
       // Halt if hardware sensor is missing
     }
   }
 
-  beepShort();
+  soundBootReady();
   promptScan();
 }
 
@@ -180,20 +265,34 @@ void loop() {
     Serial.println("✅ Wi-Fi reconnected!");
   }
 
-  // 1. Check if the Result Button is pressed
-  if (digitalRead(BTN_RESULT) == LOW) {
+  // 1. Check if the Result Touch Sensor is triggered
+  if (digitalRead(TOUCH_RESULT) == TOUCH_ACTIVE) {
     delay(50); // Debounce
-    if (digitalRead(BTN_RESULT) == LOW) {
-      Serial.println("\n📊 Result inspection button pressed.");
-      beepShort();
+    if (digitalRead(TOUCH_RESULT) == TOUCH_ACTIVE) {
+      Serial.println("\n📊 Result inspection touch sensor triggered.");
+      soundTallyClick();
       fetchAndShowResults();
-      while (digitalRead(BTN_RESULT) == LOW) { delay(10); } // Wait for release
+      while (digitalRead(TOUCH_RESULT) == TOUCH_ACTIVE) { delay(10); } // Wait for touch release
       delay(3000);
       promptScan();
     }
   }
 
-  // 2. Poll Optical Fingerprint Sensor
+  // 2. Check if Enroll New Voter Push Button is pressed (GPIO 32)
+  if (digitalRead(BTN_ENROLL) == LOW) {
+    delay(50); // Debounce
+    if (digitalRead(BTN_ENROLL) == LOW) {
+      Serial.println("\n👤 ENROLL NEW VOTER button triggered!");
+      soundBootReady();
+      int newId = getNextAvailableID();
+      enrollFingerprint(newId);
+      while (digitalRead(BTN_ENROLL) == LOW) { delay(10); } // Wait for button release
+      delay(1000);
+      promptScan();
+    }
+  }
+
+  // 3. Poll Optical Fingerprint Sensor
   int fingerStatus = checkFingerprint();
 
   if (fingerStatus > 0) {
@@ -201,7 +300,7 @@ void loop() {
     Serial.print("\n👆 Finger Matched! Database Template ID #");
     Serial.println(voterID);
 
-    beepDouble();
+    soundFingerMatched();
 
     // Local Pre-Flight Check
     if (voterID < MAX_LOCAL_VOTERS && hasVotedLocal[voterID]) {
@@ -211,7 +310,7 @@ void loop() {
       lcd.print("Fraud Alert!");
       lcd.setCursor(0, 1);
       lcd.print("Already Voted!");
-      longBeep();
+      soundFraudAlarm();
       delay(2500);
       promptScan();
       return;
@@ -223,9 +322,10 @@ void loop() {
     // Display welcome on LCD
     lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("Hi " + voterName.substring(0, 13));
+    lcd.print("Voter: " + voterName.substring(0, 9));
     lcd.setCursor(0, 1);
-    lcd.print("Press Party Key");
+    lcd.print("Choose Candidate");
+    delay(1500);
 
     // 3. Capture Ballot Button Press with Timeout
     takeVote(voterID, voterName);
@@ -238,7 +338,7 @@ void loop() {
     lcd.print("Fingerprint");
     lcd.setCursor(0, 1);
     lcd.print("Not Matched!");
-    longBeep();
+    soundFingerRejected();
     delay(2000);
     promptScan();
   }
@@ -297,6 +397,13 @@ void takeVote(int id, String name) {
 
   Serial.println("-> Waiting for candidate button (GPIO 13, 14, 25, 26)...");
 
+  // Display the candidate choices clearly on the 16x2 LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("1:BJP     2:UBT ");
+  lcd.setCursor(0, 1);
+  lcd.print("3:Cong  4:AIMIM");
+
   while (!voteCast) {
     // Check timeout
     if (millis() - startTime > VOTE_TIMEOUT_MS) {
@@ -306,49 +413,49 @@ void takeVote(int id, String name) {
       lcd.print("Session Timeout");
       lcd.setCursor(0, 1);
       lcd.print("No Vote Cast");
-      longBeep();
+      soundTimeout();
       delay(2000);
       promptScan();
       return;
     }
 
-    // Button 1: Party A
-    if (digitalRead(BTN_PARTY_A) == LOW) {
+    // Touch 1: Party A (BJP)
+    if (digitalRead(TOUCH_PARTY_A) == TOUCH_ACTIVE) {
       delay(40); // Debounce
-      if (digitalRead(BTN_PARTY_A) == LOW) {
+      if (digitalRead(TOUCH_PARTY_A) == TOUCH_ACTIVE) {
         selectedParty = PARTY_A_NAME;
         localVotesA++;
-        while (digitalRead(BTN_PARTY_A) == LOW) { delay(10); }
+        while (digitalRead(TOUCH_PARTY_A) == TOUCH_ACTIVE) { delay(10); }
         voteCast = true;
       }
     }
-    // Button 2: Party B
-    else if (digitalRead(BTN_PARTY_B) == LOW) {
+    // Touch 2: Party B (UBT)
+    else if (digitalRead(TOUCH_PARTY_B) == TOUCH_ACTIVE) {
       delay(40);
-      if (digitalRead(BTN_PARTY_B) == LOW) {
+      if (digitalRead(TOUCH_PARTY_B) == TOUCH_ACTIVE) {
         selectedParty = PARTY_B_NAME;
         localVotesB++;
-        while (digitalRead(BTN_PARTY_B) == LOW) { delay(10); }
+        while (digitalRead(TOUCH_PARTY_B) == TOUCH_ACTIVE) { delay(10); }
         voteCast = true;
       }
     }
-    // Button 3: Party C
-    else if (digitalRead(BTN_PARTY_C) == LOW) {
+    // Touch 3: Party C (Congress)
+    else if (digitalRead(TOUCH_PARTY_C) == TOUCH_ACTIVE) {
       delay(40);
-      if (digitalRead(BTN_PARTY_C) == LOW) {
+      if (digitalRead(TOUCH_PARTY_C) == TOUCH_ACTIVE) {
         selectedParty = PARTY_C_NAME;
         localVotesC++;
-        while (digitalRead(BTN_PARTY_C) == LOW) { delay(10); }
+        while (digitalRead(TOUCH_PARTY_C) == TOUCH_ACTIVE) { delay(10); }
         voteCast = true;
       }
     }
-    // Button 4: Party D
-    else if (digitalRead(BTN_PARTY_D) == LOW) {
+    // Touch 4: Party D (AIMIM)
+    else if (digitalRead(TOUCH_PARTY_D) == TOUCH_ACTIVE) {
       delay(40);
-      if (digitalRead(BTN_PARTY_D) == LOW) {
+      if (digitalRead(TOUCH_PARTY_D) == TOUCH_ACTIVE) {
         selectedParty = PARTY_D_NAME;
         localVotesD++;
-        while (digitalRead(BTN_PARTY_D) == LOW) { delay(10); }
+        while (digitalRead(TOUCH_PARTY_D) == TOUCH_ACTIVE) { delay(10); }
         voteCast = true;
       }
     }
@@ -356,13 +463,21 @@ void takeVote(int id, String name) {
     delay(20);
   }
 
-  Serial.println("-> Button Pressed! Choice: " + selectedParty);
-  beepShort();
+  Serial.println("-> Touch Triggered! Choice: " + selectedParty);
+  soundPartySelected();
 
-  // Show "Submitting" on LCD
+  // 1. Explicitly show the voter WHOM they really voted for!
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Recording Ballot");
+  lcd.print("YOU VOTED FOR:");
+  lcd.setCursor(0, 1);
+  lcd.print(">> " + selectedParty);
+  delay(2000); // 2 full seconds for voter to clearly see their choice
+
+  // 2. Show Web3 blockchain submission
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Vote: " + selectedParty.substring(0, 10));
   lcd.setCursor(0, 1);
   lcd.print("Broadcasting...");
 
@@ -375,23 +490,32 @@ void takeVote(int id, String name) {
     hasVotedLocal[id] = true;
   }
 
-  // Visual & Audio Confirmation
+  // 3. Final On-Chain / Ledger Confirmation
   lcd.clear();
   if (chainSuccess) {
     lcd.setCursor(0, 0);
-    lcd.print("Vote Secured!");
+    lcd.print("Vote: " + selectedParty.substring(0, 10));
     lcd.setCursor(0, 1);
-    lcd.print("Sepolia Minied");
-    beepShort();
+    lcd.print("Sepolia Mined");
+    soundVoteSecured();
+    delay(1500);
   } else {
     lcd.setCursor(0, 0);
-    lcd.print("Vote Stored");
+    lcd.print("Vote: " + selectedParty.substring(0, 10));
     lcd.setCursor(0, 1);
-    lcd.print("Terminal Cache");
-    beepShort();
+    lcd.print("Recorded Offline");
+    soundVoteOffline();
+    delay(1500);
   }
 
-  delay(2500);
+  // 4. "Thanks for Voting" screen for 3 seconds, then reset immediately!
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("   THANK YOU    ");
+  lcd.setCursor(0, 1);
+  lcd.print("  FOR VOTING!   ");
+  delay(3000);
+
   promptScan();
 }
 
@@ -411,7 +535,9 @@ bool broadcastVoteToBlockchain(String voterId, String party) {
 
   // Construct JSON payload
   String jsonPayload = "{\"voterID\":\"" + voterId + "\",\"party\":\"" + party + "\"}";
-  Serial.println("📤 [HTTP POST -> Node.js Relayer]: " + jsonPayload);
+  Serial.print("📤 [HTTP POST -> ");
+  Serial.print(SERVER_VOTE_URL);
+  Serial.println("]: " + jsonPayload);
 
   int httpResponseCode = http.POST(jsonPayload);
   String responseBody  = http.getString();
@@ -432,7 +558,7 @@ bool broadcastVoteToBlockchain(String voterId, String party) {
     lcd.print("FRAUD ALERT!");
     lcd.setCursor(0, 1);
     lcd.print("Already on Chain");
-    longBeep();
+    soundFraudAlarm();
     delay(2000);
     return false;
   } else {
@@ -525,24 +651,242 @@ int checkFingerprint() {
   return -1;
 }
 
-void beepShort() {
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(120);
+// Find first free memory slot in R307 sensor
+int getNextAvailableID() {
+  for (int id = 5; id < MAX_LOCAL_VOTERS; id++) {
+    if (finger.loadModel(id) != FINGERPRINT_OK) {
+      return id; // Found first unassigned slot
+    }
+  }
+  return 5;
+}
+
+// Live Enrollment Mode: Guided 2-step biometric registration
+int enrollFingerprint(int id) {
+  int p = -1;
+  Serial.print("-> Starting registration for New Voter slot #");
+  Serial.println(id);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Enroll Voter #" + String(id));
+  lcd.setCursor(0, 1);
+  lcd.print("Place Finger...");
+
+  // Step 1: Wait for finger placement
+  unsigned long enrollStart = millis();
+  while (p != FINGERPRINT_OK) {
+    if (millis() - enrollStart > 15000) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Enroll Cancelled");
+      lcd.setCursor(0, 1);
+      lcd.print("Timeout Error");
+      soundTimeout();
+      delay(2000);
+      return -1;
+    }
+    p = finger.getImage();
+    delay(50);
+  }
+
+  p = finger.image2Tz(1);
+  if (p != FINGERPRINT_OK) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Scan Failed");
+    lcd.setCursor(0, 1);
+    lcd.print("Try Again");
+    soundFingerRejected();
+    delay(2000);
+    return -1;
+  }
+
+  soundFingerMatched();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Remove Finger");
+  lcd.setCursor(0, 1);
+  lcd.print("Wait...");
+
+  delay(1200);
+  p = 0;
+  while (p != FINGERPRINT_NOFINGER) {
+    p = finger.getImage();
+    delay(50);
+  }
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Place Same Finger");
+  lcd.setCursor(0, 1);
+  lcd.print("Again to Confirm");
+
+  // Step 2: Wait for same finger to confirm minutiae
+  enrollStart = millis();
+  p = -1;
+  while (p != FINGERPRINT_OK) {
+    if (millis() - enrollStart > 15000) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Enroll Cancelled");
+      lcd.setCursor(0, 1);
+      lcd.print("Timeout Error");
+      soundTimeout();
+      delay(2000);
+      return -1;
+    }
+    p = finger.getImage();
+    delay(50);
+  }
+
+  p = finger.image2Tz(2);
+  if (p != FINGERPRINT_OK) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Scan Failed");
+    lcd.setCursor(0, 1);
+    lcd.print("Try Again");
+    soundFingerRejected();
+    delay(2000);
+    return -1;
+  }
+
+  // Step 3: Create model and save into R307 flash EEPROM
+  p = finger.createModel();
+  if (p != FINGERPRINT_OK) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Finger Mismatch");
+    lcd.setCursor(0, 1);
+    lcd.print("Registration Err");
+    soundFraudAlarm();
+    delay(2500);
+    return -1;
+  }
+
+  p = finger.storeModel(id);
+  if (p == FINGERPRINT_OK) {
+    Serial.print("-> SUCCESS: Biometric saved to template slot #");
+    Serial.println(id);
+
+    // Reset local voting record so this new voter can vote immediately!
+    if (id < MAX_LOCAL_VOTERS) {
+      hasVotedLocal[id] = false;
+    }
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Voter #" + String(id) + " Saved!");
+    lcd.setCursor(0, 1);
+    lcd.print("Ready to Vote ✅");
+    soundVoteSecured();
+    delay(3000);
+    return id;
+  } else {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Flash Storage");
+    lcd.setCursor(0, 1);
+    lcd.print("Write Failed!");
+    soundFraudAlarm();
+    delay(2000);
+    return -1;
+  }
+}
+
+// ===============================================================================
+// 12. DISTINCT AUDIO TONE ENGINE IMPLEMENTATION
+// Works with both Active Buzzers (distinct cadences) & Passive Buzzers (musical pitches)
+// ===============================================================================
+
+// 1. Boot Ready: Upbeat 3-step rising chime
+void soundBootReady() {
+  tone(BUZZER_PIN, 1800, 70); delay(80);
+  tone(BUZZER_PIN, 2400, 70); delay(80);
+  tone(BUZZER_PIN, 3200, 140); delay(150);
+  noTone(BUZZER_PIN);
   digitalWrite(BUZZER_PIN, LOW);
+}
+
+// 2. Fingerprint Matched: Cheerful double-pip ("Pip-Pip!")
+void soundFingerMatched() {
+  tone(BUZZER_PIN, 2500, 60); delay(80);
+  tone(BUZZER_PIN, 3100, 90); delay(100);
+  noTone(BUZZER_PIN);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+// 3. Fingerprint Rejected / Not in DB: Low dual buzz ("Bzz-Bzz")
+void soundFingerRejected() {
+  tone(BUZZER_PIN, 600, 160); delay(190);
+  tone(BUZZER_PIN, 450, 240); delay(260);
+  noTone(BUZZER_PIN);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+// 4. Candidate Party Selected: Quick tactile acknowledgment click
+void soundPartySelected() {
+  tone(BUZZER_PIN, 2400, 70); delay(80);
+  noTone(BUZZER_PIN);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+// 5. Vote Secured & Mined on Blockchain: Celebratory victory fanfare (4 rising notes!)
+void soundVoteSecured() {
+  tone(BUZZER_PIN, 1800, 70); delay(90);
+  tone(BUZZER_PIN, 2200, 70); delay(90);
+  tone(BUZZER_PIN, 2800, 90); delay(110);
+  tone(BUZZER_PIN, 3600, 260); delay(280);
+  noTone(BUZZER_PIN);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+// 6. Vote Recorded Offline: Steady double blip
+void soundVoteOffline() {
+  tone(BUZZER_PIN, 1600, 100); delay(120);
+  tone(BUZZER_PIN, 1600, 100); delay(120);
+  noTone(BUZZER_PIN);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+// 7. Fraud Alarm / Already Voted: Urgent rapid siren alarm (Bee-Bop-Bee-Bop-Wail!)
+void soundFraudAlarm() {
+  for (int i = 0; i < 4; i++) {
+    tone(BUZZER_PIN, 3400, 70); delay(80);
+    tone(BUZZER_PIN, 1200, 70); delay(80);
+  }
+  tone(BUZZER_PIN, 800, 400); delay(420);
+  noTone(BUZZER_PIN);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+// 8. Session Timeout: Descending 3-step power down
+void soundTimeout() {
+  tone(BUZZER_PIN, 2400, 90); delay(110);
+  tone(BUZZER_PIN, 1700, 90); delay(110);
+  tone(BUZZER_PIN, 1000, 220); delay(240);
+  noTone(BUZZER_PIN);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+// 9. Tally / Results Button: Dual high blip
+void soundTallyClick() {
+  tone(BUZZER_PIN, 2600, 50); delay(60);
+  tone(BUZZER_PIN, 3200, 60); delay(70);
+  noTone(BUZZER_PIN);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+// Legacy wrappers for backward compatibility
+void beepShort() {
+  soundPartySelected();
 }
 
 void beepDouble() {
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(80);
-  digitalWrite(BUZZER_PIN, LOW);
-  delay(80);
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(80);
-  digitalWrite(BUZZER_PIN, LOW);
+  soundFingerMatched();
 }
 
 void longBeep() {
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(900);
-  digitalWrite(BUZZER_PIN, LOW);
+  soundFraudAlarm();
 }
