@@ -49,6 +49,35 @@ const PARTY_SCHEMES = [
   }
 ];
 
+// 4 State Regions and Sub-Regions (Districts)
+const STATE_DISTRICTS = {
+  Konkan: ["Mumbai", "Thane", "Raigad", "Palghar"],
+  Vidarbha: ["Nagpur", "Amravati", "Akola", "Wardha"],
+  Marathwada: ["Aurangabad", "Nanded", "Latur", "Jalna"],
+  Paschim: ["Pune", "Kolhapur", "Satara", "Solapur"]
+};
+
+function updateDistrictOptions(selectedRegion, targetSelectId = "bio-enroll-district") {
+  const select = document.getElementById(targetSelectId);
+  if (!select) return;
+  const list = STATE_DISTRICTS[selectedRegion] || STATE_DISTRICTS["Konkan"];
+  select.innerHTML = "";
+  list.forEach(d => {
+    const opt = document.createElement("option");
+    opt.value = d;
+    opt.textContent = d;
+    select.appendChild(opt);
+  });
+}
+
+function updateSimRegion(region) {
+  updateDistrictOptions(region, "sim-district-select");
+  const indicator = document.getElementById("sim-regional-franchise-indicator");
+  if (indicator) {
+    indicator.textContent = `🌐 Remote Voting: Terminal dynamically adapts to voter's registered home region: ${region}`;
+  }
+}
+
 // View Titles Mapping
 const VIEW_TITLES = {
   "tab-tallies": {
@@ -67,6 +96,10 @@ const VIEW_TITLES = {
     title: "Voter Registry Status Verification",
     subtitle: "Cryptographic Query Engine for Single-Vote Compliance"
   },
+  "tab-biometrics": {
+    title: "Biometric Registry // MongoDB Datastore",
+    subtitle: "Centralized Secure Storage for R307 512-Byte Optical Fingerprint Minutiae & Citizen IDs"
+  },
   "tab-architecture": {
     title: "System Architecture & Engineering Blueprint",
     subtitle: "End-to-End Edge Hardware to EVM Blockchain Data Pipeline"
@@ -82,9 +115,13 @@ let appState = {
   health: null,
   votesData: null,
   recentVotes: [],
+  currentRound: 1,
   autoRefresh: true,
   refreshTimer: null,
-  ledgerSearchQuery: ""
+  ledgerSearchQuery: "",
+  biometricVoters: [],
+  biometricFilter: "all",
+  biometricSearch: ""
 };
 
 // ===============================================================================
@@ -95,16 +132,19 @@ document.addEventListener("DOMContentLoaded", () => {
   initMobileMenu();
   initSimulator();
   initAuditor();
+  initBiometrics();
   initArchitectureAnimation();
   fetchInitialData();
 
-  // Polling: Auto-sync telemetry every 8 seconds
+  // Polling: Auto-sync telemetry every 2 seconds for near real-time hardware sync
   appState.refreshTimer = setInterval(() => {
     if (appState.autoRefresh) {
       refreshData(false);
+      loadBiometricsData(false);
     }
-  }, 8000);
+  }, 2000);
 });
+
 
 // ===============================================================================
 // SIDEBAR & TAB NAVIGATION
@@ -187,6 +227,18 @@ async function fetchHealth() {
     if (topBlockEl) topBlockEl.textContent = blockNum;
     if (sideBlockEl) sideBlockEl.textContent = blockNum;
 
+    // Election Round
+    if (data.electionRound) {
+      const topRoundEl = document.getElementById("topbar-round");
+      if (topRoundEl) topRoundEl.textContent = `#${data.electionRound} Active`;
+
+      if (appState.currentRound && data.electionRound > appState.currentRound) {
+        logToSimConsole(`🔄 [SYSTEM RESET] Election Round #${data.electionRound} initialized! All citizen voter IDs are eligible to vote.`, "success");
+        showToast(`🔄 Round #${data.electionRound} started! Voter registry refreshed.`, "info");
+      }
+      appState.currentRound = data.electionRound;
+    }
+
     // Latency
     const latencyEl = document.getElementById("topbar-latency");
     if (latencyEl && data.network?.latencyMs !== null) {
@@ -217,6 +269,23 @@ async function fetchHealth() {
     if (sideBalEl) sideBalEl.textContent = balStr;
     if (kpiBalEl) kpiBalEl.textContent = balStr;
 
+    // MongoDB Telemetry
+    const sideMongoEl = document.getElementById("sidebar-mongo-status");
+    if (sideMongoEl && data.mongodb) {
+      if (data.mongodb.connected) {
+        sideMongoEl.textContent = "Online";
+        sideMongoEl.style.color = "#10B981";
+      } else {
+        sideMongoEl.textContent = "Buffer Mode";
+        sideMongoEl.style.color = "#F59E0B";
+      }
+    }
+
+    if (data.biometrics?.total !== undefined) {
+      const bioCountEl = document.getElementById("sidebar-biometric-count");
+      if (bioCountEl) bioCountEl.textContent = data.biometrics.total;
+    }
+
   } catch (err) {
     console.error("Health check error:", err);
   }
@@ -227,6 +296,13 @@ async function fetchVotes() {
     const res = await fetch(`${API_BASE}/api/blockchain/votes`);
     const data = await res.json();
     if (data.success) {
+      if (data.electionRound) {
+        const topRoundEl = document.getElementById("topbar-round");
+        if (topRoundEl) topRoundEl.textContent = `#${data.electionRound} Active`;
+        if (appState.currentRound && data.electionRound > appState.currentRound) {
+          appState.currentRound = data.electionRound;
+        }
+      }
       appState.votesData = data;
       renderTallies(data);
     }
@@ -333,6 +409,38 @@ function renderTallies(data) {
 
   // Populate candidate select in simulator
   populateSimulatorCandidates(parties.map(p => p[0]));
+
+  // Render Regional Constituency Tabulation (4 State Regions)
+  const regContainer = document.getElementById("regional-tallies-container");
+  if (regContainer && data.regionalTallies) {
+    regContainer.innerHTML = "";
+    Object.entries(data.regionalTallies).forEach(([regName, partyVotes]) => {
+      const regDistricts = STATE_DISTRICTS[regName] || [];
+      const regCard = document.createElement("div");
+      regCard.style.cssText = "background: rgba(14, 18, 27, 0.7); border: 1px solid var(--border-glass); border-radius: 8px; padding: 14px;";
+
+      let totalRegVotes = Object.values(partyVotes).reduce((a, b) => a + b, 0);
+
+      let rowsHtml = Object.entries(partyVotes).map(([p, count]) => `
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; padding: 4px 0; border-bottom: 1px dashed rgba(255,255,255,0.04);">
+          <span style="color: var(--c-pearl); font-weight: 600;">${p}</span>
+          <span style="font-family: var(--font-mono); color: #38BDF8; font-weight: 700;">${count}</span>
+        </div>
+      `).join("");
+
+      regCard.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px;">
+          <div>
+            <h4 style="font-size: 0.96rem; font-weight: 700; color: #fff; margin: 0 0 2px 0;">${regName}</h4>
+            <span style="font-size: 0.68rem; color: var(--mono-silver);">${regDistricts.join(", ")}</span>
+          </div>
+          <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38BDF8; font-family: var(--font-mono); font-size: 0.72rem; padding: 2px 8px; border-radius: 4px;">${totalRegVotes} Votes</span>
+        </div>
+        <div>${rowsHtml}</div>
+      `;
+      regContainer.appendChild(regCard);
+    });
+  }
 }
 
 function renderRecentLedger(votes) {
@@ -443,8 +551,8 @@ function quickSelectParty(partyName) {
   showToast(`Selected ballot candidate: ${partyName}`, "info");
 }
 
-// Quick select citizen identifier
-function setSimVoter(uid, btnEl) {
+// Quick select citizen identifier with regional franchise support
+function setSimVoter(uid, btnEl, region, district) {
   const input = document.getElementById("sim-voter-id");
   if (input) input.value = uid;
 
@@ -453,7 +561,19 @@ function setSimVoter(uid, btnEl) {
     btnEl.classList.add("active");
   }
 
-  logToSimConsole(`Loaded citizen template UID: ${uid}`, "info");
+  if (region) {
+    const regSelect = document.getElementById("sim-region-select");
+    if (regSelect) {
+      regSelect.value = region;
+      updateSimRegion(region);
+    }
+  }
+  if (district) {
+    const distSelect = document.getElementById("sim-district-select");
+    if (distSelect) distSelect.value = district;
+  }
+
+  logToSimConsole(`Loaded citizen template UID: ${uid} [Constituency: ${region || "Auto"} - ${district || "Auto"}]`, "info");
 }
 
 function setSimParty(partyName) {
@@ -528,9 +648,13 @@ async function executeSimulatedVote(voterId, party, isFraudAttempt = false) {
   const submitBtn = document.getElementById("btn-submit-vote");
   if (submitBtn) submitBtn.disabled = true;
 
+  const region = document.getElementById("sim-region-select")?.value || "Konkan";
+  const district = document.getElementById("sim-district-select")?.value || "Mumbai";
+
   logToSimConsole(`\n--- VOTING CONDUIT EXECUTION ---`, "info");
   logToSimConsole(`1. [Edge Terminal] Optical scanner captured minutiae for Citizen ID: "${voterId}"`, "info");
-  logToSimConsole(`2. [Hardware -> Wi-Fi] Dispatching authenticated packet to /api/blockchain/vote...`, "info");
+  logToSimConsole(`2. [Regional Franchise] Ingesting ballot for Region: [${region} - ${district}]`, "info");
+  logToSimConsole(`3. [Hardware -> Wi-Fi] Dispatching authenticated packet to /api/blockchain/vote...`, "info");
 
   triggerArchAnimation();
 
@@ -538,27 +662,48 @@ async function executeSimulatedVote(voterId, party, isFraudAttempt = false) {
     const res = await fetch(`${API_BASE}/api/blockchain/vote`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ voterID: voterId, party })
+      body: JSON.stringify({
+        voterID: voterId,
+        party,
+        region,
+        district,
+        ballotRegion: region,
+        terminalLocation: "Booth #01 Enclave"
+      })
     });
 
     const data = await res.json();
 
     if (res.status === 200 && data.success) {
-      logToSimConsole(`3. [SHA-256 Engine] Cryptographic Anonymized Hash: ${data.voterHash}`, "success");
-      logToSimConsole(`4. [Pre-Flight Guard] Verified contract state: Unvoted (hasVoted = false)`, "success");
-      logToSimConsole(`5. [EVM Consensus] Transaction broadcasted and mined into Block #${data.blockNumber}`, "success");
+      if (data.biometric && data.biometric.citizenName) {
+        logToSimConsole(`4. [MongoDB Datastore] Biometric Profile Synced: ${data.biometric.citizenName} (Slot #${data.biometric.slot}) [${data.region || region}] marked as Voted`, "success");
+      }
+      logToSimConsole(`5. [SHA-256 Engine] Cryptographic Anonymized Hash: ${data.voterHash}`, "success");
+      logToSimConsole(`6. [Pre-Flight Guard] Verified contract state: Unvoted (hasVoted = false)`, "success");
+      logToSimConsole(`7. [EVM Consensus] Transaction broadcasted and mined into Block #${data.blockNumber} for ${data.region || region}`, "success");
       logToSimConsole(`✅ [FINALIZED] Tx Hash: ${data.transactionHash}`, "success");
       logToSimConsole(`🔗 Public Etherscan: ${data.etherscanLink}`, "info");
 
-      showToast("Vote successfully committed to Sepolia ledger", "success");
+      showToast(`Vote successfully committed to Sepolia ledger for ${data.region || region}!`, "success");
       await refreshData(false);
+      loadBiometricsData(false);
+    } else if (res.status === 403 || data.regionalViolation) {
+      logToSimConsole(`🛑 [REGIONAL FRANCHISE VIOLATION] CROSS-CONSTITUENCY BALLOT BLOCKED!`, "error");
+      logToSimConsole(`   • Violation: ${data.error}`, "error");
+      logToSimConsole(`   • Registered Home Region: ${data.registeredRegion}`, "error");
+      logToSimConsole(`   • Attempted Ballot Region: ${data.attemptedRegion}`, "error");
+      logToSimConsole(`   • Rule: Voters can use ANY machine remotely, but can ONLY vote for their home region!`, "warn");
+      showToast(data.error || "Regional Franchise Violation: Cannot vote in other regions!", "error");
+      loadBiometricsData(false);
     } else if (res.status === 409 || data.fraudAlert) {
       logToSimConsole(`🛑 [FRAUD DETECTED] DOUBLE-VOTING VIOLATION BLOCKED!`, "error");
       logToSimConsole(`   • Violation: ${data.error}`, "error");
       logToSimConsole(`   • Anonymized Hash: ${data.voterHash}`, "error");
+      logToSimConsole(`   • MongoDB Audit: FRAUD_REJECTED event logged in biometric_audit_logs`, "warn");
       logToSimConsole(`   • Outcome: Pre-flight check rejected ballot. Zero gas consumed.`, "warn");
 
       showToast(data.error || "Fraud Alert: Voter already recorded!", "error");
+      loadBiometricsData(false);
     } else {
       logToSimConsole(`❌ [ERROR] ${data.error || "Transaction broadcast failed"}`, "error");
       showToast(data.error || "Transaction submission failed", "error");
@@ -764,3 +909,639 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+
+// ===============================================================================
+// RESULTS SHOWCASE & ELECTION RESET ENGINE
+// ===============================================================================
+async function showcaseResultsAndReset() {
+  const btnTallies = document.getElementById("btn-showcase-tallies");
+  const btnSim = document.getElementById("btn-sim-result");
+  if (btnTallies) btnTallies.disabled = true;
+  if (btnSim) btnSim.disabled = true;
+
+  logToSimConsole(`\n📊 [RESULT KEY TRIGGERED] Concluding voting program & querying official tabulation...`, "warn");
+
+  try {
+    const res = await fetch(`${API_BASE}/api/election/reset`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: "WEB_DASHBOARD_RESULT_BUTTON" })
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+      const conc = data.concludedElection || {};
+      const winnerName = conc.winner || "No Ballots Cast";
+      const totalBallots = conc.totalVotes || 0;
+
+      // Update Showcase Modal elements
+      const modal = document.getElementById("modal-showcase");
+      const winnerEl = document.getElementById("showcase-winner-name");
+      const metaEl = document.getElementById("showcase-winner-meta");
+      const roundBadgeEl = document.getElementById("showcase-round-badge");
+      const talliesContainer = document.getElementById("showcase-tallies-list");
+
+      if (winnerEl) winnerEl.textContent = winnerName;
+      if (metaEl) metaEl.textContent = `${totalBallots} Total Certified Ballots Recorded`;
+      if (roundBadgeEl) roundBadgeEl.textContent = `Round #${data.concludedRound} Certified Final`;
+
+      if (talliesContainer && conc.tallies) {
+        talliesContainer.innerHTML = "";
+        const parties = Object.entries(conc.tallies);
+        parties.forEach(([pName, pVotes]) => {
+          const pct = totalBallots > 0 ? ((pVotes / totalBallots) * 100).toFixed(1) : "0.0";
+          const row = document.createElement("div");
+          row.className = "showcase-tally-row";
+          row.innerHTML = `
+            <div class="showcase-party-info">
+              <span class="showcase-party-name">${escapeHtml(pName)}</span>
+            </div>
+            <div>
+              <span class="showcase-party-count">${pVotes} Votes</span>
+              <span class="showcase-party-pct">(${pct}%)</span>
+            </div>
+          `;
+          talliesContainer.appendChild(row);
+        });
+      }
+
+      if (modal) modal.style.display = "flex";
+
+      // Log to Enclave Simulator Console
+      logToSimConsole(`🏆 [RESULTS SHOWCASED] Round #${data.concludedRound} concluded! Victor: ${winnerName} (${totalBallots} votes)`, "success");
+      logToSimConsole(`🔄 [SYSTEM RESET] Initialized Election Round #${data.newRound}!`, "success");
+      logToSimConsole(`✨ [VOTER REGISTRY CLEARED] All citizen IDs (Vallabh, Payal, Prathamesh, Sanika...) have been reset.`, "info");
+      logToSimConsole(`🗳️ Citizens who previously voted are now eligible to cast their ballot again for Round #${data.newRound}!`, "info");
+
+      appState.currentRound = data.newRound;
+      const topRoundEl = document.getElementById("topbar-round");
+      if (topRoundEl) topRoundEl.textContent = `#${data.newRound} Active`;
+
+      // Refresh telemetry & tallies
+      await refreshData(false);
+      showToast(`🏆 Results Showcased! System reset for Round #${data.newRound}. Citizens can vote again!`, "success");
+    } else {
+      showToast(data.error || "Failed to conclude election", "error");
+    }
+  } catch (err) {
+    console.error("Showcase & Reset Error:", err);
+    showToast("Network fault during election reset", "error");
+  } finally {
+    if (btnTallies) btnTallies.disabled = false;
+    if (btnSim) btnSim.disabled = false;
+  }
+}
+
+function closeShowcaseModal() {
+  const modal = document.getElementById("modal-showcase");
+  if (modal) modal.style.display = "none";
+}
+
+// ===============================================================================
+// BIOMETRIC REGISTRY & MONGODB CLIENT LOGIC
+// ===============================================================================
+
+let lastSimulatedTemplate = "";
+
+function initBiometrics() {
+  loadBiometricsData(true);
+}
+
+/**
+ * Fetches and updates live MongoDB biometric telemetry, voter directory, and audit logs
+ */
+async function loadBiometricsData(showLoading = false) {
+  const cardsContainer = document.getElementById("voters-cards-list");
+  if (showLoading && cardsContainer && !appState.biometricVoters.length) {
+    cardsContainer.innerHTML = `
+      <div style="text-align: center; padding: 40px; color: var(--mono-muted); font-size: 0.85rem;">
+        Synchronizing with MongoDB biometric store...
+      </div>
+    `;
+  }
+
+  try {
+    // 1. Fetch MongoDB Telemetry & Stats
+    const statusRes = await fetch(`${API_BASE}/api/fingerprints/status`);
+    const statusData = await statusRes.json();
+
+    if (statusData.success) {
+      const mongo = statusData.mongodb;
+      const stats = statusData.stats;
+
+      // Status Pill
+      const pill = document.getElementById("mongo-status-pill");
+      const text = document.getElementById("mongo-status-text");
+      if (pill && text) {
+        if (mongo.connected) {
+          pill.className = "mongo-status-pill online";
+          text.textContent = "MongoDB Connected";
+        } else {
+          pill.className = "mongo-status-pill offline";
+          text.textContent = "MongoDB Buffer Mode";
+        }
+      }
+
+      // KPIs
+      const statTotalEl = document.getElementById("bio-stat-total");
+      const statSlotsEl = document.getElementById("bio-stat-slots");
+      const statVotedEl = document.getElementById("bio-stat-voted");
+      const statTurnoutEl = document.getElementById("bio-stat-turnout");
+      const statDbEl = document.getElementById("bio-stat-db");
+      const statCollsEl = document.getElementById("bio-stat-colls");
+
+      if (statTotalEl) statTotalEl.textContent = stats.total;
+      if (statSlotsEl) statSlotsEl.textContent = `${stats.total} / 127`;
+      if (statVotedEl) statVotedEl.textContent = stats.voted;
+      if (statTurnoutEl) statTurnoutEl.textContent = `${stats.turnoutPct}% Turnout`;
+      if (statDbEl) statDbEl.textContent = mongo.database || "biometric_voting";
+      if (statCollsEl) statCollsEl.textContent = `Mode: ${mongo.mode}`;
+
+      // Sidebar count
+      const sideCount = document.getElementById("sidebar-biometric-count");
+      if (sideCount) sideCount.textContent = stats.total;
+    }
+
+    // 2. Fetch Enrolled Voters List
+    const votersRes = await fetch(`${API_BASE}/api/fingerprints`);
+    const votersData = await votersRes.json();
+
+    if (votersData.success) {
+      appState.biometricVoters = votersData.voters || [];
+      renderBiometricVoters(appState.biometricVoters);
+      populateScannerSelect(appState.biometricVoters);
+    }
+
+    // 3. Fetch Biometric Audit Logs
+    const auditRes = await fetch(`${API_BASE}/api/fingerprints/audit-logs?limit=25`);
+    const auditData = await auditRes.json();
+    if (auditData.success) {
+      renderBiometricAuditLogs(auditData.logs || []);
+    }
+
+  } catch (err) {
+    console.error("Biometrics fetch error:", err);
+  }
+}
+
+/**
+ * Renders voter cards into directory grid
+ */
+function renderBiometricVoters(voters) {
+  const container = document.getElementById("voters-cards-list");
+  if (!container) return;
+
+  let filtered = [...voters];
+
+  // Apply Filter
+  if (appState.biometricFilter === "unvoted") {
+    filtered = filtered.filter(v => !v.hasVoted);
+  } else if (appState.biometricFilter === "voted") {
+    filtered = filtered.filter(v => v.hasVoted);
+  } else if (["konkan", "vidarbha", "marathwada", "paschim"].includes(appState.biometricFilter.toLowerCase())) {
+    filtered = filtered.filter(v => v.region && v.region.toLowerCase() === appState.biometricFilter.toLowerCase());
+  }
+
+  // Apply Search
+  if (appState.biometricSearch) {
+    const q = appState.biometricSearch.toLowerCase();
+    filtered = filtered.filter(v =>
+      v.name.toLowerCase().includes(q) ||
+      v.voterId.toLowerCase().includes(q) ||
+      (v.constituency && v.constituency.toLowerCase().includes(q)) ||
+      (v.region && v.region.toLowerCase().includes(q)) ||
+      (v.district && v.district.toLowerCase().includes(q)) ||
+      (v.nationalId && v.nationalId.toLowerCase().includes(q))
+    );
+  }
+
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 40px; color: var(--mono-silver); font-size: 0.85rem;">
+        No citizen biometric profiles matched your query.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = "";
+
+  filtered.forEach(voter => {
+    const card = document.createElement("div");
+    card.className = "voter-card-item";
+
+    const isVoted = voter.hasVoted;
+    const statusBadge = isVoted
+      ? `<span class="status-badge-mined" style="color: #fb7185; background: rgba(244,63,94,0.12); border: 1px solid rgba(244,63,94,0.3); font-size: 0.65rem;">Ballot Cast (Round #${voter.votedRound || 1})</span>`
+      : `<span class="status-badge-mined" style="color: #10B981; background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); font-size: 0.65rem;">Ready to Vote</span>`;
+
+    const regBadge = `<span class="badge" style="background: rgba(56,189,248,0.12); color: #38BDF8; border: 1px solid rgba(56,189,248,0.25); font-size: 0.65rem; padding: 1px 6px; border-radius: 4px;">${escapeHtml(voter.region || "Konkan")} • ${escapeHtml(voter.district || "Mumbai")}</span>`;
+
+    const truncatedHash = voter.templateHash
+      ? `${voter.templateHash.substring(0, 10)}...${voter.templateHash.substring(voter.templateHash.length - 8)}`
+      : "Pending";
+
+    card.innerHTML = `
+      <div class="voter-avatar-slot">
+        #${voter.fingerprintSlot}
+        <span>Slot</span>
+      </div>
+
+      <div class="voter-item-info">
+        <div class="voter-item-name" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <span>${escapeHtml(voter.name)}</span>
+          ${regBadge}
+          ${statusBadge}
+        </div>
+        <div class="voter-item-meta">
+          <span><strong>UID:</strong> ${escapeHtml(voter.voterId)}</span>
+          <span><strong>Constituency:</strong> ${escapeHtml(voter.constituency || (voter.region + " - " + voter.district))}</span>
+          <span><strong>Age/Gender:</strong> ${voter.age || 25} / ${escapeHtml(voter.gender || "Undisclosed")}</span>
+          <span><strong>Finger:</strong> ${escapeHtml(voter.fingerIndex || "Index")}</span>
+        </div>
+        <div class="voter-item-hash">
+          Registered: <code>${new Date(voter.registrationAt || voter.registeredAt || Date.now()).toLocaleDateString()}</code>
+        </div>
+      </div>
+
+      <div class="voter-actions-row">
+        <button class="btn-icon-sm" onclick="testScanSpecificVoter('${escapeHtml(voter.voterId)}')" title="Test Scan on R307 Optical Sensor">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 004 11m0 0a8 8 0 00.99 7.132"/>
+          </svg>
+        </button>
+
+        <button class="btn-icon-sm" onclick="loadCitizenIntoTerminal('${escapeHtml(voter.voterId)}', '${escapeHtml(voter.name)}', '${escapeHtml(voter.region || "Konkan")}', '${escapeHtml(voter.district || "Mumbai")}')" title="Authorize in Booth #01 Terminal">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        </button>
+
+        <button class="btn-icon-sm danger" onclick="deleteBiometricVoter('${escapeHtml(voter.voterId)}', '${escapeHtml(voter.name)}')" title="Remove Biometric Profile">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          </svg>
+        </button>
+      </div>
+    `;
+
+    container.appendChild(card);
+  });
+}
+
+/**
+ * Populates optical scanner verification dropdown
+ */
+function populateScannerSelect(voters) {
+  const select = document.getElementById("verify-select-voter");
+  if (!select) return;
+
+  const currentVal = select.value;
+  select.innerHTML = `<option value="">Choose Enrolled Voter to Scan...</option>`;
+
+  voters.forEach(v => {
+    const opt = document.createElement("option");
+    opt.value = v.voterId;
+    opt.textContent = `Slot #${v.fingerprintSlot} — ${v.name} (${v.voterId})${v.hasVoted ? ' [VOTED]' : ' [READY]'}`;
+    select.appendChild(opt);
+  });
+
+  if (currentVal) select.value = currentVal;
+}
+
+/**
+ * Renders audit logs into real-time stream
+ */
+function renderBiometricAuditLogs(logs) {
+  const container = document.getElementById("biometric-audit-stream");
+  if (!container) return;
+
+  if (logs.length === 0) {
+    container.innerHTML = `
+      <div style="padding: 16px; text-align: center; color: var(--mono-muted); font-size: 0.75rem;">
+        Zero biometric audit events logged yet.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = "";
+
+  logs.forEach(log => {
+    const row = document.createElement("div");
+    row.className = "audit-stream-row";
+
+    const time = new Date(log.timestamp || log.createdAt).toLocaleTimeString();
+    const actionClass = log.action || "INFO";
+
+    row.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span class="audit-stream-badge ${actionClass}">${actionClass}</span>
+        <span style="color: var(--mono-platinum); font-weight: 600;">
+          ${escapeHtml(log.voterName || log.voterId || "System")}
+        </span>
+        <span style="color: var(--mono-silver); font-size: 0.72rem;">
+          ${escapeHtml(log.details || "")}
+        </span>
+      </div>
+      <span style="color: var(--mono-muted); font-family: var(--font-mono); font-size: 0.68rem;">
+        ${time}
+      </span>
+    `;
+
+    container.appendChild(row);
+  });
+}
+
+/**
+ * Filter directory buttons handler
+ */
+function filterVotersList(filter, btn) {
+  appState.biometricFilter = filter;
+  const parent = btn.parentElement;
+  if (parent) {
+    parent.querySelectorAll(".btn-preset-pill").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+  }
+  renderBiometricVoters(appState.biometricVoters);
+}
+
+/**
+ * Live search filter handler
+ */
+function handleVoterSearch(val) {
+  appState.biometricSearch = (val || "").trim();
+  renderBiometricVoters(appState.biometricVoters);
+}
+
+/**
+ * Generates an authentic 512B AS608 template preview for enrollment form
+ */
+async function generateSimTemplatePreview() {
+  const name = document.getElementById("bio-enroll-name")?.value || "Demo Citizen";
+  const slot = document.getElementById("bio-enroll-slot")?.value || 1;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/fingerprints/generate-template`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slot, name })
+    });
+    const data = await res.json();
+    if (data.success) {
+      lastSimulatedTemplate = data.fullTemplate;
+      const previewEl = document.getElementById("minutiae-preview-text");
+      const hashEl = document.getElementById("minutiae-hash-text");
+      if (previewEl) previewEl.textContent = data.fullTemplate;
+      if (hashEl) hashEl.textContent = `SHA-256 Hash: ${data.templateHash}`;
+      showToast("512-Byte R307 AS608 Minutiae Template Generated!", "success");
+    }
+  } catch (err) {
+    showToast("Failed to generate minutiae template", "error");
+  }
+}
+
+/**
+ * Handles enrollment form submission to MongoDB
+ */
+async function handleEnrollSubmit() {
+  const name = document.getElementById("bio-enroll-name")?.value?.trim();
+  const slotVal = document.getElementById("bio-enroll-slot")?.value?.trim();
+  const uidVal = document.getElementById("bio-enroll-voterid")?.value?.trim();
+  const nidVal = document.getElementById("bio-enroll-nid")?.value?.trim();
+  const regionVal = document.getElementById("bio-enroll-region")?.value || "Konkan";
+  const districtVal = document.getElementById("bio-enroll-district")?.value || "Mumbai";
+  const fingerVal = document.getElementById("bio-enroll-finger")?.value;
+  const genderVal = document.getElementById("bio-enroll-gender")?.value;
+  const ageVal = document.getElementById("bio-enroll-age")?.value;
+  const constVal = document.getElementById("bio-enroll-constituency")?.value;
+  const submitBtn = document.getElementById("btn-submit-enroll");
+
+  if (!name) {
+    showToast("Citizen full name is required", "error");
+    return;
+  }
+
+  if (submitBtn) submitBtn.disabled = true;
+
+  try {
+    const payload = {
+      name,
+      fingerprintSlot: slotVal ? Number(slotVal) : undefined,
+      voterId: uidVal || undefined,
+      nationalId: nidVal,
+      region: regionVal,
+      district: districtVal,
+      fingerIndex: fingerVal,
+      gender: genderVal,
+      age: Number(ageVal) || 28,
+      constituency: constVal || `${regionVal} - ${districtVal}`,
+      fingerprintTemplate: lastSimulatedTemplate || undefined
+    };
+
+    const res = await fetch(`${API_BASE}/api/fingerprints/enroll`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (res.status === 201 && data.success) {
+      showToast(`✅ ${data.message}`, "success");
+      document.getElementById("form-enroll-citizen")?.reset();
+      lastSimulatedTemplate = "";
+      const previewEl = document.getElementById("minutiae-preview-text");
+      const hashEl = document.getElementById("minutiae-hash-text");
+      if (previewEl) previewEl.textContent = "EF01FFFFFFFF01020005C89F3A41B67D... (Click 'Simulate Extraction' to preview AS608 character file)";
+      if (hashEl) hashEl.textContent = "SHA-256: Uncalculated";
+
+      await loadBiometricsData(false);
+    } else {
+      showToast(data.error || "Failed to enroll citizen", "error");
+    }
+  } catch (err) {
+    showToast(`Network fault enrolling citizen: ${err.message}`, "error");
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+/**
+ * Optical sensor hardware test simulation
+ */
+async function executeBiometricScanTest() {
+  const select = document.getElementById("verify-select-voter");
+  const voterId = select ? select.value : "";
+  const scanBtn = document.getElementById("btn-scan-test");
+  const scannerDisplay = document.getElementById("optical-scanner-display");
+  const scannerLabel = document.getElementById("scanner-state-label");
+  const resultDiv = document.getElementById("verify-scan-result");
+
+  if (!voterId) {
+    showToast("Please choose an enrolled voter to scan", "error");
+    return;
+  }
+
+  if (scanBtn) scanBtn.disabled = true;
+  if (scannerDisplay) scannerDisplay.classList.add("scanning");
+  if (scannerLabel) scannerLabel.textContent = "ACQUIRING RIDGES // DSP 1:N SEARCH...";
+  if (resultDiv) resultDiv.style.display = "none";
+
+  try {
+    const res = await fetch(`${API_BASE}/api/fingerprints/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ voterId })
+    });
+
+    const data = await res.json();
+
+    setTimeout(() => {
+      if (scannerDisplay) scannerDisplay.classList.remove("scanning");
+      if (scannerLabel) scannerLabel.textContent = "PRISM READY // PLACE FINGER";
+      if (scanBtn) scanBtn.disabled = false;
+
+      if (!resultDiv) return;
+      resultDiv.style.display = "block";
+
+      if (data.success && data.matched) {
+        const v = data.voter;
+        if (v.hasVoted) {
+          resultDiv.innerHTML = `
+            <div style="padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: var(--radius-sm); margin-top: 14px;">
+              <div style="display: flex; align-items: center; gap: 8px; color: #EF4444; font-weight: 700; font-size: 0.88rem; margin-bottom: 6px;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                <span>DOUBLE-VOTING FRAUD DETECTED</span>
+              </div>
+              <p style="font-size: 0.76rem; color: var(--mono-platinum); margin: 0; line-height: 1.5;">
+                Citizen <strong>${escapeHtml(v.name)}</strong> (Slot #${v.fingerprintSlot}) matched with <strong>${v.qualityScore}% confidence</strong>, but has already recorded a ballot in Round #${v.votedRound || 1}.
+              </p>
+            </div>
+          `;
+          showToast(`🛑 Fraud Warning: ${v.name} has already cast a vote!`, "error");
+        } else {
+          resultDiv.innerHTML = `
+            <div style="padding: 16px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: var(--radius-sm); margin-top: 14px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                <div style="display: flex; align-items: center; gap: 8px; color: #10B981; font-weight: 700; font-size: 0.88rem;">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  <span>BIOMETRIC AUTHENTICATION VERIFIED</span>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="loadCitizenIntoTerminal('${escapeHtml(v.voterId)}', '${escapeHtml(v.name)}')">
+                  Authorize & Vote
+                </button>
+              </div>
+              <p style="font-size: 0.76rem; color: var(--mono-platinum); margin: 0; line-height: 1.5;">
+                Citizen <strong>${escapeHtml(v.name)}</strong> (Slot #${v.fingerprintSlot}) authenticated with <strong>${v.qualityScore}% score</strong>. Voter is unvoted & eligible.
+              </p>
+            </div>
+          `;
+          showToast(`✅ Biometric Match: ${v.name} is authenticated & eligible to vote!`, "success");
+        }
+      } else {
+        resultDiv.innerHTML = `
+          <div style="padding: 14px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: var(--radius-sm); margin-top: 14px; color: #F59E0B; font-size: 0.8rem;">
+            ⚠️ Biometric scan failed: Minutiae points did not match sensor database.
+          </div>
+        `;
+        showToast("Biometric verification: No match found", "warn");
+      }
+
+      loadBiometricsData(false);
+    }, 700);
+
+  } catch (err) {
+    if (scannerDisplay) scannerDisplay.classList.remove("scanning");
+    if (scannerLabel) scannerLabel.textContent = "PRISM READY // PLACE FINGER";
+    if (scanBtn) scanBtn.disabled = false;
+    showToast("Sensor communication error", "error");
+  }
+}
+
+/**
+ * Triggers test scan for a specific voter card
+ */
+function testScanSpecificVoter(voterId) {
+  const select = document.getElementById("verify-select-voter");
+  if (select) {
+    select.value = voterId;
+    executeBiometricScanTest();
+  }
+}
+
+/**
+ * Deletes a citizen biometric profile from MongoDB
+ */
+async function deleteBiometricVoter(voterId, name) {
+  if (!confirm(`Are you sure you want to remove ${name} (${voterId}) from MongoDB?`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/fingerprints/${encodeURIComponent(voterId)}`, {
+      method: "DELETE"
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Voter ${name} de-registered from MongoDB`, "success");
+      await loadBiometricsData(false);
+    } else {
+      showToast(data.error || "Failed to remove voter", "error");
+    }
+  } catch (err) {
+    showToast("Network fault removing voter", "error");
+  }
+}
+
+/**
+ * Re-seeds default voters into MongoDB
+ */
+async function seedDefaultMongoVoters() {
+  try {
+    const res = await fetch(`${API_BASE}/api/fingerprints/seed`, {
+      method: "POST"
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast("Default citizen biometric records seeded into MongoDB", "success");
+      await loadBiometricsData(false);
+    } else {
+      showToast(data.error || "Failed to seed default voters", "error");
+    }
+  } catch (err) {
+    showToast("Network error seeding MongoDB", "error");
+  }
+}
+
+/**
+ * Loads citizen into Enclave Terminal to vote immediately with Regional Franchise Binding
+ */
+function loadCitizenIntoTerminal(voterId, name, region = "Konkan", district = "Mumbai") {
+  // Switch to simulator tab
+  const simTabBtn = document.querySelector('.nav-item[data-tab="tab-simulator"]');
+  if (simTabBtn) simTabBtn.click();
+
+  const voterInput = document.getElementById("sim-voter-id");
+  if (voterInput) {
+    voterInput.value = voterId;
+  }
+
+  if (region) {
+    const regSelect = document.getElementById("sim-region-select");
+    if (regSelect) {
+      regSelect.value = region;
+      updateSimRegion(region);
+    }
+  }
+  if (district) {
+    const distSelect = document.getElementById("sim-district-select");
+    if (distSelect) distSelect.value = district;
+  }
+
+  logToSimConsole(`\n📥 Loaded Citizen Biometric Profile from MongoDB: "${name}" (${voterId}) [Constituency: ${region} - ${district}]`, "success");
+  logToSimConsole(`🌐 Anywhere Remote Voting: Terminal dynamically adapts to voter's registered home region [${region}].`, "info");
+  showToast(`Loaded ${name} (${region}) into Booth #01 Terminal`, "success");
+}
+

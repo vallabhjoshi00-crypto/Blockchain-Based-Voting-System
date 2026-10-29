@@ -19,6 +19,12 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Python & Temporary Scratch
+__pycache__/
+*.py[cod]
+scratch/
+scratch_*/
+
 # OS Files
 .DS_Store
 Thumbs.db
