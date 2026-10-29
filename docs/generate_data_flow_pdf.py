@@ -1665,16 +1665,7 @@ if __name__ == "__main__":
     if not os.path.exists(diagram_paths['chart3']):
         generate_chart3_web3_blockchain_storage(diagram_paths['chart3'])
 
-    # Build Master PDF
-    pdf_main = os.path.join(docs_dir, "VOTECHAIN_Data_Flow_and_Security_Specification.pdf")
-    build_data_flow_pdf(pdf_main, diagram_paths)
-
-    # Sync to security_specification.pdf and security_specialization.pdf
-    pdf_spec = os.path.join(docs_dir, "security_specification.pdf")
-    pdf_spec_alias = os.path.join(docs_dir, "security_specialization.pdf")
-
-    shutil.copyfile(pdf_main, pdf_spec)
-    print(f"[OK] Copied to: {pdf_spec}")
-    shutil.copyfile(pdf_main, pdf_spec_alias)
-    print(f"[OK] Copied to: {pdf_spec_alias}")
-    print("[ALL TASKS COMPLETE] Security specification PDF compiled with all 3 operational condition flowcharts!")
+    # Build Target PDF
+    pdf_target = os.path.join(docs_dir, "security_specialization.pdf")
+    build_data_flow_pdf(pdf_target, diagram_paths)
+    print(f"[SUCCESS] Security specification PDF compiled at: {pdf_target}")
