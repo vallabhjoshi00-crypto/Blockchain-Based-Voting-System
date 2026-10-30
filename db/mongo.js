@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
-import { FingerprintVoter, getRegionalVoterModel, getRegionalVoteModel } from "../models/FingerprintVoter.js";
+import { FingerprintVoter, getRegionalVoterModel, getRegionalVoteModel, getISTTimestamp } from "../models/FingerprintVoter.js";
 import { BiometricAuditLog } from "../models/BiometricAuditLog.js";
 
 // Connection & Telemetry State
@@ -66,9 +66,12 @@ export const DEFAULT_VOTERS = [
     gender: "Male",
     age: 26,
     fingerIndex: "Right Index Finger",
+    fingerprintTemplate: generateMinutiaeTemplate(1, "Vallabh Joshi_FP_UID_1").template,
+    templateHash: generateMinutiaeTemplate(1, "Vallabh Joshi_FP_UID_1").hash,
     hasVoted: false,
-    registrationAt: new Date(),
-    registeredAt: new Date()
+    registrationAt: getISTTimestamp(),
+    registeredAt: getISTTimestamp(),
+    registrationAtIST: getISTTimestamp()
   },
   {
     voterId: "FP_UID_2",
@@ -80,9 +83,12 @@ export const DEFAULT_VOTERS = [
     gender: "Male",
     age: 31,
     fingerIndex: "Right Thumb",
+    fingerprintTemplate: generateMinutiaeTemplate(2, "Rahul Sharma_FP_UID_2").template,
+    templateHash: generateMinutiaeTemplate(2, "Rahul Sharma_FP_UID_2").hash,
     hasVoted: false,
-    registrationAt: new Date(),
-    registeredAt: new Date()
+    registrationAt: getISTTimestamp(),
+    registeredAt: getISTTimestamp(),
+    registrationAtIST: getISTTimestamp()
   },
   {
     voterId: "FP_UID_3",
@@ -94,9 +100,12 @@ export const DEFAULT_VOTERS = [
     gender: "Female",
     age: 28,
     fingerIndex: "Left Index Finger",
+    fingerprintTemplate: generateMinutiaeTemplate(3, "Priya Patel_FP_UID_3").template,
+    templateHash: generateMinutiaeTemplate(3, "Priya Patel_FP_UID_3").hash,
     hasVoted: false,
-    registrationAt: new Date(),
-    registeredAt: new Date()
+    registrationAt: getISTTimestamp(),
+    registeredAt: getISTTimestamp(),
+    registrationAtIST: getISTTimestamp()
   },
   {
     voterId: "FP_UID_4",
@@ -108,9 +117,12 @@ export const DEFAULT_VOTERS = [
     gender: "Female",
     age: 24,
     fingerIndex: "Right Index Finger",
+    fingerprintTemplate: generateMinutiaeTemplate(4, "Ananya Desai_FP_UID_4").template,
+    templateHash: generateMinutiaeTemplate(4, "Ananya Desai_FP_UID_4").hash,
     hasVoted: false,
-    registrationAt: new Date(),
-    registeredAt: new Date()
+    registrationAt: getISTTimestamp(),
+    registeredAt: getISTTimestamp(),
+    registrationAtIST: getISTTimestamp()
   }
 ];
 
@@ -121,8 +133,9 @@ function initInMemoryStore() {
     inMemoryVoters.set(v.voterId, {
       ...v,
       hasVoted: false,
-      registrationAt: new Date(),
-      registeredAt: new Date()
+      registrationAt: getISTTimestamp(),
+      registeredAt: getISTTimestamp(),
+      registrationAtIST: getISTTimestamp()
     });
   });
 }
@@ -231,39 +244,61 @@ export async function initMongo() {
 export async function seedDefaultVotersIfEmpty(force = false) {
   try {
     if (!isMongoConnected) return;
+    if (!force) {
+      console.log("ℹ️ [MONGODB] Automatic re-seeding bypassed. Database is ready for manual registration.");
+      return;
+    }
 
-    // 1. Clean up legacy bulky fields from all existing documents using replaceOne
+    // 1. Populate all existing documents in MongoDB with 512-byte templates & hashes
     try {
       const allDocs = await FingerprintVoter.find({}).lean();
       for (const d of allDocs) {
         const reg = d.region || "Konkan";
         const dist = d.district || (reg === "Vidarbha" ? "Nagpur" : reg === "Marathwada" ? "Aurangabad" : reg === "Paschim" ? "Pune" : "Mumbai");
-        await FingerprintVoter.replaceOne(
-          { _id: d._id },
-          {
-            voterId: d.voterId,
-            fingerprintSlot: d.fingerprintSlot,
-            name: d.name,
-            region: reg,
-            district: dist,
-            constituency: d.constituency || `${reg} - ${dist}`,
-            age: d.age || 25,
-            gender: d.gender || "Undisclosed",
-            fingerIndex: d.fingerIndex || "Right Index Finger",
-            hasVoted: d.hasVoted || false,
-            registrationAt: d.registrationAt || d.registeredAt || new Date(),
-            registeredAt: d.registeredAt || new Date()
-          }
+        let template = d.fingerprintTemplate;
+        let hash = d.templateHash;
+        if (!template || template.length < 32) {
+          const generated = generateMinutiaeTemplate(d.fingerprintSlot || 1, `${d.name}_${d.voterId}`);
+          template = generated.template;
+          hash = generated.hash;
+        }
+
+        const enrichedDoc = {
+          voterId: d.voterId,
+          fingerprintSlot: d.fingerprintSlot,
+          name: d.name,
+          region: reg,
+          district: dist,
+          constituency: d.constituency || `${reg} - ${dist}`,
+          age: d.age || 25,
+          gender: d.gender || "Undisclosed",
+          fingerIndex: d.fingerIndex || "Right Index Finger",
+          fingerprintTemplate: template,
+          templateHash: hash,
+          hasVoted: d.hasVoted || false,
+          registrationAt: getISTTimestamp(d.registrationAt || d.registeredAt),
+          registeredAt: getISTTimestamp(d.registeredAt),
+          registrationAtIST: getISTTimestamp(d.registrationAt || d.registeredAt)
+        };
+
+        await FingerprintVoter.replaceOne({ _id: d._id }, enrichedDoc);
+
+        const RegionalModel = getRegionalVoterModel(reg);
+        await RegionalModel.findOneAndUpdate(
+          { voterId: d.voterId },
+          { $set: enrichedDoc },
+          { upsert: true, returnDocument: 'after' }
         );
       }
     } catch (cleanErr) {
-      console.warn("Legacy schema cleanup notice:", cleanErr.message);
+      console.warn("Template enrichment notice:", cleanErr.message);
     }
 
-    // 2. Synchronize all 4 regional collections + central collection with clean, minimal info
+    // 2. Synchronize all 4 regional collections + central collection with templates
     for (const defVoter of DEFAULT_VOTERS) {
       const RegionalModel = getRegionalVoterModel(defVoter.region);
-      const cleanData = {
+      const { template, hash } = generateMinutiaeTemplate(defVoter.fingerprintSlot, `${defVoter.name}_${defVoter.voterId}`);
+      const voterData = {
         voterId: defVoter.voterId,
         fingerprintSlot: defVoter.fingerprintSlot,
         name: defVoter.name,
@@ -273,29 +308,35 @@ export async function seedDefaultVotersIfEmpty(force = false) {
         age: defVoter.age,
         gender: defVoter.gender,
         fingerIndex: defVoter.fingerIndex,
+        fingerprintTemplate: defVoter.fingerprintTemplate || template,
+        templateHash: defVoter.templateHash || hash,
         hasVoted: defVoter.hasVoted || false,
-        registrationAt: defVoter.registrationAt || new Date(),
-        registeredAt: defVoter.registeredAt || new Date()
+        registrationAt: getISTTimestamp(defVoter.registrationAt),
+        registeredAt: getISTTimestamp(defVoter.registeredAt),
+        registrationAtIST: getISTTimestamp(defVoter.registrationAt)
       };
 
       // Save into region-specific collection (e.g. voters_marathwada)
       await RegionalModel.findOneAndUpdate(
         { voterId: defVoter.voterId },
-        { $set: cleanData },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
+        { $set: voterData },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
       );
 
       // Save into central collection
       await FingerprintVoter.findOneAndUpdate(
         { voterId: defVoter.voterId },
-        { $set: cleanData },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
+        { $set: voterData },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
       );
+
+      // Keep in-memory store in sync
+      inMemoryVoters.set(defVoter.voterId, voterData);
     }
 
-    console.log(`✅ [MONGODB] Regional voter collections (voters_konkan, voters_vidarbha, voters_marathwada, voters_paschim) synchronized with minimal data!`);
+    console.log("✅ [MONGODB] Fingerprint templates & regional collections (voters_konkan, voters_vidarbha, voters_marathwada, voters_paschim) fully populated in MongoDB Atlas!");
   } catch (err) {
-    console.error(`❌ Error seeding default voters:`, err.message);
+    console.error("❌ Error seeding default voters:", err.message);
   }
 }
 
@@ -336,7 +377,8 @@ export async function getMongoStatus() {
     ],
     totalVoters: voterCount,
     votedCount,
-    lastAttempt: new Date(lastConnectionAttempt).toISOString(),
+    lastAttempt: getISTTimestamp(lastConnectionAttempt),
+    lastAttemptIST: getISTTimestamp(lastConnectionAttempt),
     error: connectionError
   };
 }
@@ -526,9 +568,12 @@ export async function enrollVoter(data) {
     gender: gender || "Undisclosed",
     age: age ? Number(age) : 25,
     fingerIndex: fingerIndex || "Right Index Finger",
+    fingerprintTemplate: template,
+    templateHash: hash,
     hasVoted: false,
-    registrationAt: new Date(),
-    registeredAt: new Date()
+    registrationAt: getISTTimestamp(),
+    registeredAt: getISTTimestamp(),
+    registrationAtIST: getISTTimestamp()
   };
 
   if (isMongoConnected) {
@@ -671,52 +716,95 @@ export async function deleteVoter(voterId) {
  * Verifies a fingerprint scan against the database
  */
 export async function verifyBiometric(criteria) {
-  const { slotId, voterId, templateData } = criteria;
+  const { slotId, voterId, templateData, template, templateHash } = criteria;
+  const inputTemplate = (templateData || template || "").trim().toUpperCase();
   let voter = null;
 
-  if (slotId) {
-    voter = await getVoterBySlot(slotId);
-  } else if (voterId) {
-    voter = await getVoterById(voterId);
-  } else if (templateData) {
-    const hash = crypto.createHash("sha256").update(templateData).digest("hex");
+  // 1. Direct template matching against MongoDB documents
+  if (inputTemplate) {
+    const hash = templateHash || crypto.createHash("sha256").update(inputTemplate).digest("hex");
     if (isMongoConnected) {
       try {
-        voter = await FingerprintVoter.findOne({ templateHash: hash }).lean();
-      } catch {}
+        voter = await FingerprintVoter.findOne({
+          $or: [
+            { templateHash: hash },
+            { fingerprintTemplate: inputTemplate }
+          ]
+        }).lean();
+
+        if (!voter) {
+          for (const reg of ["Konkan", "Vidarbha", "Marathwada", "Paschim"]) {
+            const RegionalModel = getRegionalVoterModel(reg);
+            voter = await RegionalModel.findOne({
+              $or: [
+                { templateHash: hash },
+                { fingerprintTemplate: inputTemplate }
+              ]
+            }).lean();
+            if (voter) break;
+          }
+        }
+      } catch (err) {
+        console.warn("MongoDB verifyBiometric template error:", err.message);
+      }
     }
     if (!voter) {
-      voter = Array.from(inMemoryVoters.values()).find((v) => v.templateHash === hash);
+      voter = Array.from(inMemoryVoters.values()).find(
+        (v) => v.templateHash === hash || v.fingerprintTemplate === inputTemplate
+      );
     }
+  }
+
+  // 2. Verification by Slot ID directly from MongoDB
+  if (!voter && slotId) {
+    voter = await getVoterBySlot(slotId);
+  } else if (!voter && voterId) {
+    voter = await getVoterById(voterId);
   }
 
   if (!voter) {
     await logBiometricEvent({
       action: "SCAN_NO_MATCH",
-      details: `Fingerprint scan had no match in database (Slot: ${slotId || "N/A"})`,
+      details: `Fingerprint verify failed: No matching template found in MongoDB (Slot: ${slotId || "N/A"})`,
       status: "WARNING"
     });
     return {
       matched: false,
-      message: "No matching biometric profile found in database"
+      verified: false,
+      message: "No matching biometric profile found in MongoDB database"
     };
   }
-
-  // Update last verified timestamp
-  await updateVoter(voter.voterId, { lastVerifiedAt: new Date() });
 
   await logBiometricEvent({
     action: "SCAN_MATCH",
     voterId: voter.voterId,
     fingerprintSlot: voter.fingerprintSlot,
     voterName: voter.name,
-    details: `Optical match confirmed (Confidence: ${voter.qualityScore}%)`,
+    region: voter.region,
+    district: voter.district,
+    details: `Biometric verification confirmed directly from MongoDB (Flash memory bypassed)`,
     status: "SUCCESS"
   });
 
   return {
     matched: true,
-    voter,
+    verified: true,
+    source: "MONGODB_ATLAS",
+    flashMemoryBypassed: true,
+    voter: {
+      voterId: voter.voterId,
+      name: voter.name,
+      fingerprintSlot: voter.fingerprintSlot,
+      region: voter.region,
+      district: voter.district,
+      constituency: voter.constituency,
+      age: voter.age,
+      gender: voter.gender,
+      fingerIndex: voter.fingerIndex,
+      fingerprintTemplate: voter.fingerprintTemplate,
+      templateHash: voter.templateHash,
+      hasVoted: voter.hasVoted
+    },
     canVote: !voter.hasVoted,
     hasAlreadyVoted: voter.hasVoted
   };
@@ -768,7 +856,8 @@ export async function recordBiometricVote({
         party,
         transactionHash: transactionHash || null,
         blockNumber: blockNumber || null,
-        votedAt: new Date()
+        votedAt: getISTTimestamp(),
+        votedAtIST: getISTTimestamp()
       });
 
       // 2. Set hasVoted: true in regional voter collection (e.g. voters_marathwada)
@@ -850,7 +939,8 @@ export async function resetBiometricsForRound(newRound) {
 export async function logBiometricEvent(eventData) {
   const logEntry = {
     ...eventData,
-    timestamp: new Date()
+    timestamp: getISTTimestamp(),
+    timestampIST: getISTTimestamp()
   };
 
   if (isMongoConnected) {
@@ -911,4 +1001,23 @@ export async function getBiometricStats() {
     unvoted,
     turnoutPct: total > 0 ? ((voted / total) * 100).toFixed(1) : "0.0"
   };
+}
+
+/**
+ * Fetches all voter templates directly from MongoDB for hardware verification
+ */
+export async function getAllVoterTemplates() {
+  const res = await getVoters({ limit: 127 });
+  const voters = res.voters || res;
+  return voters.map((v) => ({
+    slotId: v.fingerprintSlot,
+    voterId: v.voterId,
+    name: v.name,
+    region: v.region,
+    district: v.district,
+    constituency: v.constituency,
+    fingerprintTemplate: v.fingerprintTemplate || "",
+    templateHash: v.templateHash || "",
+    hasVoted: v.hasVoted || false
+  }));
 }

@@ -650,3 +650,4 @@ if __name__ == "__main__":
 
     # Step 2: Build PDF
     build_infomongo_pdf(pdf_output, diagram_output)
+

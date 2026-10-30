@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { getISTTimestamp } from "./FingerprintVoter.js";
 
 const BiometricAuditLogSchema = new mongoose.Schema(
   {
@@ -71,13 +72,17 @@ const BiometricAuditLogSchema = new mongoose.Schema(
       default: ""
     },
     timestamp: {
-      type: Date,
-      default: Date.now,
+      type: String,
+      default: () => getISTTimestamp(),
       index: true
+    },
+    timestampIST: {
+      type: String,
+      default: () => getISTTimestamp()
     }
   },
   {
-    timestamps: true
+    timestamps: false
   }
 );
 

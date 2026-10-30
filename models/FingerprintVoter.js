@@ -1,10 +1,69 @@
 import mongoose from "mongoose";
 
 /**
- * Minimal Citizen Voter Schema
- * Stores essential demographic and franchise identification only:
- * _id, voterId, name, constituency, region, district, age, gender, fingerIndex, registrationAt, registeredAt, fingerprintSlot, hasVoted
- * (Excludes heavy 1024-char templates, hashes, quality telemetry, and audit artifacts)
+ * Formats a Date into Indian Standard Time (IST - Asia/Kolkata, UTC+05:30)
+ * Example output: "2026-10-30 10:25:30 IST"
+ */
+export function getISTTimestamp(date = new Date()) {
+  if (typeof date === "string" && date.includes("IST")) {
+    return date.trim();
+  }
+
+  let d;
+  if (date instanceof Date) {
+    d = date;
+  } else if (typeof date === "number") {
+    d = new Date(date);
+  } else if (typeof date === "string") {
+    d = new Date(date);
+    if (isNaN(d.getTime())) {
+      d = new Date(date.replace(/\s*IST\s*$/i, ""));
+    }
+  } else {
+    d = new Date();
+  }
+
+  if (isNaN(d.getTime())) {
+    d = new Date();
+  }
+
+  const options = {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  };
+
+  const parts = new Intl.DateTimeFormat("en-GB", options).formatToParts(d);
+  const p = {};
+  parts.forEach(({ type, value }) => {
+    p[type] = value;
+  });
+
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second} IST`;
+}
+
+/**
+ * Returns ISO-8601 string with explicit IST (+05:30) offset:
+ * Example: "2026-10-30T10:25:40.123+05:30"
+ */
+export function getISTISO(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d.getTime())) return new Date().toISOString();
+
+  const istOffsetMs = 5.5 * 60 * 60 * 1000;
+  const istDate = new Date(d.getTime() + istOffsetMs);
+  return istDate.toISOString().replace("Z", "+05:30");
+}
+
+/**
+ * Citizen Voter Schema
+ * Stores demographic information, franchise identification, and biometric templates on MongoDB:
+ * _id, voterId, name, constituency, region, district, age, gender, fingerIndex, fingerprintTemplate, templateHash, fingerprintSlot, hasVoted, registrationAt
  */
 export const MinimalVoterSchema = new mongoose.Schema(
   {
@@ -57,18 +116,32 @@ export const MinimalVoterSchema = new mongoose.Schema(
       type: String,
       default: "Right Index Finger"
     },
+    fingerprintTemplate: {
+      type: String,
+      default: "",
+      trim: true
+    },
+    templateHash: {
+      type: String,
+      default: "",
+      trim: true
+    },
     hasVoted: {
       type: Boolean,
       default: false,
       index: true
     },
     registrationAt: {
-      type: Date,
-      default: Date.now
+      type: String,
+      default: () => getISTTimestamp()
     },
     registeredAt: {
-      type: Date,
-      default: Date.now
+      type: String,
+      default: () => getISTTimestamp()
+    },
+    registrationAtIST: {
+      type: String,
+      default: () => getISTTimestamp()
     }
   },
   {
@@ -113,8 +186,12 @@ export const RegionalVoteSchema = new mongoose.Schema(
       default: null
     },
     votedAt: {
-      type: Date,
-      default: Date.now
+      type: String,
+      default: () => getISTTimestamp()
+    },
+    votedAtIST: {
+      type: String,
+      default: () => getISTTimestamp()
     }
   },
   {
@@ -135,28 +212,24 @@ function sanitizeRegionKey(region) {
 }
 
 /**
- * Helper to get region-specific Voter model (e.g. voters_konkan, voters_marathwada)
+ * Factory for regional citizen voter models
  */
 export function getRegionalVoterModel(region) {
-  const regKey = sanitizeRegionKey(region);
-  const collName = `voters_${regKey}`;
-  if (mongoose.models[collName]) {
-    return mongoose.models[collName];
-  }
-  return mongoose.model(collName, MinimalVoterSchema, collName);
+  const key = sanitizeRegionKey(region);
+  const collectionName = `voters_${key}`;
+  const modelName = `Voter_${key}`;
+  return mongoose.models[modelName] || mongoose.model(modelName, MinimalVoterSchema, collectionName);
 }
 
 /**
- * Helper to get region-specific Cast Ballot model (e.g. votes_konkan, votes_marathwada)
+ * Factory for regional cast votes models
  */
 export function getRegionalVoteModel(region) {
-  const regKey = sanitizeRegionKey(region);
-  const collName = `votes_${regKey}`;
-  if (mongoose.models[collName]) {
-    return mongoose.models[collName];
-  }
-  return mongoose.model(collName, RegionalVoteSchema, collName);
+  const key = sanitizeRegionKey(region);
+  const collectionName = `votes_${key}`;
+  const modelName = `Vote_${key}`;
+  return mongoose.models[modelName] || mongoose.model(modelName, RegionalVoteSchema, collectionName);
 }
 
-export const FingerprintVoter =
-  mongoose.models.FingerprintVoter || mongoose.model("FingerprintVoter", MinimalVoterSchema);
+export const FingerprintVoter = mongoose.models.FingerprintVoter || mongoose.model("FingerprintVoter", MinimalVoterSchema, "fingerprintvoters");
+export default FingerprintVoter;
