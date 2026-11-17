@@ -117,10 +117,10 @@ DEFAULT_PARTIES.forEach(p => simulatedPartyTallies[p] = 0);
 
 // Regional Tallies (4 State Regions)
 const simulatedRegionalTallies = {
-  Konkan: { BJP: 0, UBT: 0, Congress: 0, AIMIM: 0 },
-  Vidarbha: { BJP: 0, UBT: 0, Congress: 0, AIMIM: 0 },
-  Marathwada: { BJP: 0, UBT: 0, Congress: 0, AIMIM: 0 },
-  Paschim: { BJP: 0, UBT: 0, Congress: 0, AIMIM: 0 }
+  Kokan: { BJP: 0, UBT: 0, Congress: 0, AIMIM: 0 },
+  Marathvada: { BJP: 0, UBT: 0, Congress: 0, AIMIM: 0 },
+  Paschim: { BJP: 0, UBT: 0, Congress: 0, AIMIM: 0 },
+  Vidarbha: { BJP: 0, UBT: 0, Congress: 0, AIMIM: 0 }
 };
 
 // =========================================================
@@ -538,7 +538,7 @@ app.get("/api/blockchain/votes", async (req, res) => {
       totalVotes,
       parties: tallies,
       regionalTallies,
-      regions: Object.keys(STATE_REGIONS),
+      regions: canonicalRegions,
       lastConcludedElection: electionHistory.length > 0 ? electionHistory[0] : null,
       contractAddress: CONTRACT_ADDRESS,
       network: "Ethereum Sepolia",

@@ -393,7 +393,7 @@
                 
                 <!-- Quick Citizen Presets matching hardware.ino database & MongoDB -->
                 <div class="citizen-preset-group">
-                  <button type="button" class="btn-preset-pill active" onclick="setSimVoter('FP_UID_1', this, 'Konkan', 'Mumbai')">Slot 1: Vallabh [Konkan]</button>
+                  <button type="button" class="btn-preset-pill active" onclick="setSimVoter('FP_UID_1', this, 'Kokan', 'Mumbai')">Slot 1: Vallabh [Kokan]</button>
                   <button type="button" class="btn-preset-pill" onclick="setSimVoter('FP_UID_2', this, 'Vidarbha', 'Nagpur')">Slot 2: Rahul [Vidarbha]</button>
                   <button type="button" class="btn-preset-pill" onclick="setSimVoter('FP_UID_3', this, 'Marathwada', 'Aurangabad')">Slot 3: Priya [Marathwada]</button>
                   <button type="button" class="btn-preset-pill" onclick="setSimVoter('FP_UID_4', this, 'Paschim', 'Pune')">Slot 4: Ananya [Paschim]</button>
@@ -409,9 +409,9 @@
                   <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                     <div>
                       <select id="sim-region-select" class="form-select" onchange="updateSimRegion(this.value)">
-                        <option value="Konkan">Konkan</option>
+                        <option value="Kokan">Kokan</option>
                         <option value="Vidarbha">Vidarbha</option>
-                        <option value="Marathwada">Marathwada</option>
+                        <option value="Marathvada">Marathvada</option>
                         <option value="Paschim">Paschim</option>
                       </select>
                     </div>
@@ -602,7 +602,7 @@
             <div class="bio-kpi-card">
               <span class="bio-kpi-label">Database Engine</span>
               <span class="bio-kpi-val" id="bio-stat-db" style="font-size: 1.15rem; color: #38BDF8;">MongoDB</span>
-              <span class="bio-kpi-sub" id="bio-stat-colls">Collection: fingerprint_voters</span>
+              <span class="bio-kpi-sub" id="bio-stat-colls">Subdivided: 4 Regional Collections</span>
             </div>
           </div>
 
@@ -676,9 +676,9 @@
                     <div>
                       <label class="form-label" for="bio-enroll-region">State Region *</label>
                       <select id="bio-enroll-region" class="form-select" onchange="updateDistrictOptions(this.value, 'bio-enroll-district')">
-                        <option value="Konkan">Konkan</option>
+                        <option value="Kokan">Kokan</option>
                         <option value="Vidarbha">Vidarbha</option>
-                        <option value="Marathwada">Marathwada</option>
+                        <option value="Marathvada">Marathvada</option>
                         <option value="Paschim">Paschim</option>
                       </select>
                     </div>
@@ -778,15 +778,15 @@
                       </svg>
                       <span>Enrolled Citizens Directory</span>
                     </div>
-                    <span style="font-size: 0.72rem; color: var(--mono-muted);">Persistent records in MongoDB database: <code style="color: #38BDF8;">biometric_voting.fingerprint_voters</code></span>
+                    <span style="font-size: 0.72rem; color: var(--mono-muted);">Subdivided Regional Collections: <code style="color: #38BDF8;">voters_kokan, voters_marathvada, voters_paschim, voters_vidarbha</code></span>
                   </div>
 
                   <!-- Filter Pills -->
                   <div style="display: flex; gap: 6px; flex-wrap: wrap;">
                     <button class="btn-preset-pill active" onclick="filterVotersList('all', this)">All</button>
-                    <button class="btn-preset-pill" onclick="filterVotersList('Konkan', this)">Konkan</button>
+                    <button class="btn-preset-pill" onclick="filterVotersList('Kokan', this)">Kokan</button>
                     <button class="btn-preset-pill" onclick="filterVotersList('Vidarbha', this)">Vidarbha</button>
-                    <button class="btn-preset-pill" onclick="filterVotersList('Marathwada', this)">Marathwada</button>
+                    <button class="btn-preset-pill" onclick="filterVotersList('Marathvada', this)">Marathvada</button>
                     <button class="btn-preset-pill" onclick="filterVotersList('Paschim', this)">Paschim</button>
                     <button class="btn-preset-pill" onclick="filterVotersList('unvoted', this)">Ready to Vote</button>
                     <button class="btn-preset-pill" onclick="filterVotersList('voted', this)">Voted</button>

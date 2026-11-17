@@ -1,6 +1,12 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
-import { FingerprintVoter, getRegionalVoterModel, getRegionalVoteModel, getISTTimestamp } from "../models/FingerprintVoter.js";
+import {
+  getRegionalVoterModel,
+  getRegionalVoteModel,
+  getISTTimestamp,
+  SUPPORTED_REGIONS,
+  sanitizeRegionKey
+} from "../models/FingerprintVoter.js";
 import { BiometricAuditLog } from "../models/BiometricAuditLog.js";
 
 // Connection & Telemetry State
@@ -10,7 +16,7 @@ let activeDbName = "biometric_voting";
 let lastConnectionAttempt = 0;
 let connectionError = null;
 
-// Fallback in-memory store if MongoDB instance is temporarily unreachable
+// Fallback in-memory store partitioned by region
 const inMemoryVoters = new Map();
 const inMemoryAuditLogs = [];
 
@@ -18,7 +24,6 @@ const inMemoryAuditLogs = [];
  * Generates an authentic 512-byte (1024 hex chars) AS608/R307 minutiae character buffer template
  */
 export function generateMinutiaeTemplate(slotId, seedString = "citizen") {
-  // Standard R307 AS608 Character File Header: 0xEF01 + Header + Slot Token
   const header = `EF01FFFFFFFF010200${Number(slotId).toString(16).padStart(4, "0")}`;
   const salt = `R307_DSP_AS608_SLOT_${slotId}_${seedString}`;
   let payload = "";
@@ -30,39 +35,49 @@ export function generateMinutiaeTemplate(slotId, seedString = "citizen") {
   return { template: fullTemplate, hash: templateHash };
 }
 
-// 4 State Regions and Sub-Regions (Districts)
+// 4 Subdivided State Regions and Districts: Kokan, Marathvada, Paschim, Vidarbha
 export const STATE_REGIONS = {
-  Konkan: {
-    name: "Konkan",
-    districts: ["Mumbai", "Thane", "Raigad", "Palghar"],
+  kokan: {
+    key: "kokan",
+    name: "Kokan",
+    districts: ["Mumbai", "Thane", "Raigad", "Palghar", "Ratnagiri", "Sindhudurg"],
     candidates: ["BJP", "UBT", "Congress", "AIMIM"]
   },
-  Vidarbha: {
-    name: "Vidarbha",
-    districts: ["Nagpur", "Amravati", "Akola", "Wardha"],
+  marathvada: {
+    key: "marathvada",
+    name: "Marathvada",
+    districts: ["Chhatrapati Sambhajinagar", "Nanded", "Latur", "Jalna", "Beed", "Parbhani", "Osmanabad"],
     candidates: ["BJP", "UBT", "Congress", "AIMIM"]
   },
-  Marathwada: {
-    name: "Marathwada",
-    districts: ["Aurangabad", "Nanded", "Latur", "Jalna"],
-    candidates: ["BJP", "UBT", "Congress", "AIMIM"]
-  },
-  Paschim: {
+  paschim: {
+    key: "paschim",
     name: "Paschim",
-    districts: ["Pune", "Kolhapur", "Satara", "Solapur"],
+    districts: ["Pune", "Kolhapur", "Satara", "Solapur", "Sangli"],
+    candidates: ["BJP", "UBT", "Congress", "AIMIM"]
+  },
+  vidarbha: {
+    key: "vidarbha",
+    name: "Vidarbha",
+    districts: ["Amravati", "Nagpur", "Akola", "Wardha", "Yavatmal", "Chandrapur"],
     candidates: ["BJP", "UBT", "Congress", "AIMIM"]
   }
 };
 
-// Default Minimal Seed Voters matching ESP32 firmware & 4 State Regions
+// Helper to retrieve regional configuration dynamically
+export function getRegionConfig(region) {
+  const key = sanitizeRegionKey(region);
+  return STATE_REGIONS[key] || STATE_REGIONS.kokan;
+}
+
+// Default Seed Voters partitioned strictly by their home region
 export const DEFAULT_VOTERS = [
   {
     voterId: "FP_UID_1",
     fingerprintSlot: 1,
     name: "Vallabh Joshi",
-    region: "Konkan",
+    region: "Kokan",
     district: "Mumbai",
-    constituency: "Konkan - Mumbai",
+    constituency: "Kokan - Mumbai",
     gender: "Male",
     age: 26,
     fingerIndex: "Right Index Finger",
@@ -94,9 +109,9 @@ export const DEFAULT_VOTERS = [
     voterId: "FP_UID_3",
     fingerprintSlot: 3,
     name: "Priya Patel",
-    region: "Marathwada",
-    district: "Aurangabad",
-    constituency: "Marathwada - Aurangabad",
+    region: "Marathvada",
+    district: "Chhatrapati Sambhajinagar",
+    constituency: "Marathvada - Sambhajinagar",
     gender: "Female",
     age: 28,
     fingerIndex: "Left Index Finger",
@@ -180,7 +195,6 @@ export async function initMongo() {
   lastConnectionAttempt = Date.now();
 
   try {
-    // Parse DB name from URI if present
     const uriMatch = mongoUri.match(/\/([^/?]+)(\?|$)/);
     if (uriMatch && uriMatch[1]) {
       activeDbName = uriMatch[1];
@@ -215,13 +229,12 @@ export async function initMongo() {
     connectionError = null;
     console.log(`✅ [MongoDB SUCCESS] Connected to database: "${activeDbName}"`);
 
-    // Check if initial seeding is needed
+    // Check if initial seeding is needed & cleanup obsolete combined collection
     await seedDefaultVotersIfEmpty();
 
-    // Log connection in audit trail
     await logBiometricEvent({
       action: "ENROLL",
-      details: "MongoDB Biometric consensus storage initialized",
+      details: "MongoDB Regional Partitioning initialized across Kokan, Marathvada, Paschim, Vidarbha",
       status: "SUCCESS"
     });
 
@@ -229,75 +242,61 @@ export async function initMongo() {
     isMongoConnected = false;
     connectionError = err.message;
     console.warn(`\n⚠️  [MongoDB NOTICE] Local/Remote MongoDB instance not detected (${err.message}).`);
-    console.warn(`💡 Biometric operations will run smoothly using the Hybrid In-Memory Biometric Buffer.`);
-    console.warn(`👉 To activate persistent MongoDB storage:`);
-    console.warn(`   1. Start local MongoDB: 'mongod' (or docker run -d -p 27017:27017 mongo)`);
-    console.warn(`   2. Or set MONGODB_URI in .env to your MongoDB Atlas connection string.\n`);
+    console.warn(`💡 Biometric operations running with partitioned in-memory buffer.`);
     startAutoReconnect();
   }
 }
 
-
 /**
- * Seeds and synchronizes minimal voter profiles across regional collections
+ * Drops obsolete central collection and seeds default voters directly into regional collections
  */
 export async function seedDefaultVotersIfEmpty(force = false) {
   try {
     if (!isMongoConnected) return;
-    if (!force) {
-      console.log("ℹ️ [MONGODB] Automatic re-seeding bypassed. Database is ready for manual registration.");
-      return;
-    }
 
-    // 1. Populate all existing documents in MongoDB with 512-byte templates & hashes
+    // Drop obsolete collections (fingerprintvoters and separate votes_* collections)
     try {
-      const allDocs = await FingerprintVoter.find({}).lean();
-      for (const d of allDocs) {
-        const reg = d.region || "Konkan";
-        const dist = d.district || (reg === "Vidarbha" ? "Nagpur" : reg === "Marathwada" ? "Aurangabad" : reg === "Paschim" ? "Pune" : "Mumbai");
-        let template = d.fingerprintTemplate;
-        let hash = d.templateHash;
-        if (!template || template.length < 32) {
-          const generated = generateMinutiaeTemplate(d.fingerprintSlot || 1, `${d.name}_${d.voterId}`);
-          template = generated.template;
-          hash = generated.hash;
+      const collections = await mongoose.connection.db.listCollections().toArray();
+      const collNames = collections.map((c) => c.name);
+      const obsoleteColls = [
+        "fingerprintvoters",
+        "fingerprint_voters",
+        "votes_konkan",
+        "votes_kokan",
+        "votes_vidarbha",
+        "votes_marathwada",
+        "votes_marathvada",
+        "votes_paschim"
+      ];
+      for (const collName of obsoleteColls) {
+        if (collNames.includes(collName)) {
+          await mongoose.connection.db.dropCollection(collName);
+          console.log(`🗑️ [MONGODB CLEANUP] Removed obsolete collection: "${collName}"`);
         }
-
-        const enrichedDoc = {
-          voterId: d.voterId,
-          fingerprintSlot: d.fingerprintSlot,
-          name: d.name,
-          region: reg,
-          district: dist,
-          constituency: d.constituency || `${reg} - ${dist}`,
-          age: d.age || 25,
-          gender: d.gender || "Undisclosed",
-          fingerIndex: d.fingerIndex || "Right Index Finger",
-          fingerprintTemplate: template,
-          templateHash: hash,
-          hasVoted: d.hasVoted || false,
-          registrationAt: getISTTimestamp(d.registrationAt || d.registeredAt),
-          registeredAt: getISTTimestamp(d.registeredAt),
-          registrationAtIST: getISTTimestamp(d.registrationAt || d.registeredAt)
-        };
-
-        await FingerprintVoter.replaceOne({ _id: d._id }, enrichedDoc);
-
-        const RegionalModel = getRegionalVoterModel(reg);
-        await RegionalModel.findOneAndUpdate(
-          { voterId: d.voterId },
-          { $set: enrichedDoc },
-          { upsert: true, returnDocument: 'after' }
-        );
       }
-    } catch (cleanErr) {
-      console.warn("Template enrichment notice:", cleanErr.message);
+    } catch (cleanupErr) {
+      // Ignored if not found
     }
 
-    // 2. Synchronize all 4 regional collections + central collection with templates
+    if (!force) {
+      // Check if any regional collection already has voters
+      let existingCount = 0;
+      for (const reg of SUPPORTED_REGIONS) {
+        const Model = getRegionalVoterModel(reg);
+        existingCount += await Model.countDocuments();
+      }
+      if (existingCount > 0) {
+        console.log(`ℹ️ [MONGODB] Regional collections populated with ${existingCount} citizens across divisions.`);
+        return;
+      }
+    }
+
+    // Seed voters strictly into their respective regional collection
     for (const defVoter of DEFAULT_VOTERS) {
-      const RegionalModel = getRegionalVoterModel(defVoter.region);
+      const regKey = sanitizeRegionKey(defVoter.region);
+      const RegionalModel = getRegionalVoterModel(regKey);
       const { template, hash } = generateMinutiaeTemplate(defVoter.fingerprintSlot, `${defVoter.name}_${defVoter.voterId}`);
+
       const voterData = {
         voterId: defVoter.voterId,
         fingerprintSlot: defVoter.fingerprintSlot,
@@ -316,32 +315,24 @@ export async function seedDefaultVotersIfEmpty(force = false) {
         registrationAtIST: getISTTimestamp(defVoter.registrationAt)
       };
 
-      // Save into region-specific collection (e.g. voters_marathwada)
+      // Save strictly in regional collection (voters_kokan, voters_marathvada, etc.)
       await RegionalModel.findOneAndUpdate(
         { voterId: defVoter.voterId },
         { $set: voterData },
-        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
+        { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
       );
 
-      // Save into central collection
-      await FingerprintVoter.findOneAndUpdate(
-        { voterId: defVoter.voterId },
-        { $set: voterData },
-        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
-      );
-
-      // Keep in-memory store in sync
       inMemoryVoters.set(defVoter.voterId, voterData);
     }
 
-    console.log("✅ [MONGODB] Fingerprint templates & regional collections (voters_konkan, voters_vidarbha, voters_marathwada, voters_paschim) fully populated in MongoDB Atlas!");
+    console.log("✅ [MONGODB SUCCESS] Regional collections (voters_kokan, voters_marathvada, voters_paschim, voters_vidarbha) initialized successfully!");
   } catch (err) {
-    console.error("❌ Error seeding default voters:", err.message);
+    console.error("❌ Error seeding regional voters:", err.message);
   }
 }
 
 /**
- * Returns overall MongoDB telemetry status
+ * Returns overall MongoDB telemetry status reflecting regional subdivision
  */
 export async function getMongoStatus() {
   let voterCount = 0;
@@ -349,8 +340,11 @@ export async function getMongoStatus() {
 
   if (isMongoConnected) {
     try {
-      voterCount = await FingerprintVoter.countDocuments();
-      votedCount = await FingerprintVoter.countDocuments({ hasVoted: true });
+      for (const reg of SUPPORTED_REGIONS) {
+        const Model = getRegionalVoterModel(reg);
+        voterCount += await Model.countDocuments();
+        votedCount += await Model.countDocuments({ hasVoted: true });
+      }
     } catch {
       voterCount = inMemoryVoters.size;
     }
@@ -362,18 +356,14 @@ export async function getMongoStatus() {
   return {
     connected: isMongoConnected,
     mode: isMongoConnected ? "LIVE_MONGODB" : "IN_MEMORY_FALLBACK",
-    uri: mongoUri.replace(/\/\/([^:]+):([^@]+)@/, "//***:***@"), // sanitize auth if present
+    uri: mongoUri.replace(/\/\/([^:]+):([^@]+)@/, "//***:***@"),
     database: activeDbName,
     collections: [
-      "voters_konkan",
-      "voters_vidarbha",
-      "voters_marathwada",
+      "voters_kokan",
+      "voters_marathvada",
       "voters_paschim",
-      "votes_konkan",
-      "votes_vidarbha",
-      "votes_marathwada",
-      "votes_paschim",
-      "fingerprintvoters"
+      "voters_vidarbha",
+      "biometricauditlogs"
     ],
     totalVoters: voterCount,
     votedCount,
@@ -384,7 +374,7 @@ export async function getMongoStatus() {
 }
 
 /**
- * Fetches all registered voters
+ * Fetches voters across regional collections or from a specific region
  */
 export async function getVoters(query = {}) {
   const { search, hasVoted, region, district, limit = 50, page = 1 } = query;
@@ -394,9 +384,6 @@ export async function getVoters(query = {}) {
       const filter = {};
       if (hasVoted !== undefined && hasVoted !== "") {
         filter.hasVoted = hasVoted === "true" || hasVoted === true;
-      }
-      if (region) {
-        filter.region = region;
       }
       if (district) {
         filter.district = district;
@@ -411,27 +398,47 @@ export async function getVoters(query = {}) {
         ];
       }
 
-      const total = await FingerprintVoter.countDocuments(filter);
-      const voters = await FingerprintVoter.find(filter)
-        .sort({ fingerprintSlot: 1 })
-        .skip((page - 1) * limit)
-        .limit(Number(limit))
-        .lean();
+      // If specific region is requested, query ONLY that region's collection
+      if (region) {
+        const regKey = sanitizeRegionKey(region);
+        const RegionalModel = getRegionalVoterModel(regKey);
+        const total = await RegionalModel.countDocuments(filter);
+        const voters = await RegionalModel.find(filter)
+          .sort({ fingerprintSlot: 1 })
+          .skip((page - 1) * limit)
+          .limit(Number(limit))
+          .lean();
+        return { success: true, region: regKey, total, page: Number(page), voters };
+      }
 
-      return { success: true, total, page: Number(page), voters };
+      // Otherwise aggregate across the 4 subdivided regional collections
+      let aggregated = [];
+      for (const reg of SUPPORTED_REGIONS) {
+        const RegionalModel = getRegionalVoterModel(reg);
+        const docs = await RegionalModel.find(filter).lean();
+        aggregated = aggregated.concat(docs);
+      }
+
+      aggregated.sort((a, b) => a.fingerprintSlot - b.fingerprintSlot);
+      const total = aggregated.length;
+      const startIndex = (page - 1) * limit;
+      const paged = aggregated.slice(startIndex, startIndex + Number(limit));
+
+      return { success: true, total, page: Number(page), voters: paged };
     } catch (err) {
-      console.warn("MongoDB query failed, falling back to memory:", err.message);
+      console.warn("MongoDB regional query failed, falling back to memory:", err.message);
     }
   }
 
-  // Memory fallback
+  // In-memory fallback
   let list = Array.from(inMemoryVoters.values());
   if (hasVoted !== undefined && hasVoted !== "") {
     const isVoted = hasVoted === "true" || hasVoted === true;
     list = list.filter((v) => v.hasVoted === isVoted);
   }
   if (region) {
-    list = list.filter((v) => v.region && v.region.toLowerCase() === region.toLowerCase());
+    const regKey = sanitizeRegionKey(region);
+    list = list.filter((v) => v.region && sanitizeRegionKey(v.region) === regKey);
   }
   if (district) {
     list = list.filter((v) => v.district && v.district.toLowerCase() === district.toLowerCase());
@@ -453,18 +460,15 @@ export async function getVoters(query = {}) {
 }
 
 /**
- * Fetches single voter by voterId or slotId
+ * Fetches single voter by voterId across the 4 regional collections
  */
 export async function getVoterById(voterId) {
   if (isMongoConnected) {
     try {
-      const voter = await FingerprintVoter.findOne({ voterId }).lean();
-      if (voter) return voter;
-
-      for (const reg of ["Konkan", "Vidarbha", "Marathwada", "Paschim"]) {
+      for (const reg of SUPPORTED_REGIONS) {
         const RegionalModel = getRegionalVoterModel(reg);
-        const regVoter = await RegionalModel.findOne({ voterId }).lean();
-        if (regVoter) return regVoter;
+        const voter = await RegionalModel.findOne({ voterId }).lean();
+        if (voter) return voter;
       }
     } catch (err) {
       console.warn("MongoDB getVoterById error:", err.message);
@@ -473,17 +477,17 @@ export async function getVoterById(voterId) {
   return inMemoryVoters.get(voterId) || null;
 }
 
+/**
+ * Fetches single voter by hardware fingerprint slot across the 4 regional collections
+ */
 export async function getVoterBySlot(slotId) {
   const numSlot = Number(slotId);
   if (isMongoConnected) {
     try {
-      const voter = await FingerprintVoter.findOne({ fingerprintSlot: numSlot }).lean();
-      if (voter) return voter;
-
-      for (const reg of ["Konkan", "Vidarbha", "Marathwada", "Paschim"]) {
+      for (const reg of SUPPORTED_REGIONS) {
         const RegionalModel = getRegionalVoterModel(reg);
-        const regVoter = await RegionalModel.findOne({ fingerprintSlot: numSlot }).lean();
-        if (regVoter) return regVoter;
+        const voter = await RegionalModel.findOne({ fingerprintSlot: numSlot }).lean();
+        if (voter) return voter;
       }
     } catch (err) {
       console.warn("MongoDB getVoterBySlot error:", err.message);
@@ -493,16 +497,16 @@ export async function getVoterBySlot(slotId) {
 }
 
 /**
- * Enrolls a new citizen fingerprint into MongoDB
+ * Enrolls a new citizen fingerprint into the designated regional collection ONLY
  */
 export async function enrollVoter(data) {
   const {
     voterId: rawVoterId,
     fingerprintSlot: rawSlot,
     name,
-    nationalId,
+    region: rawRegion,
+    district: rawDistrict,
     constituency: rawConstituency,
-    boothNumber,
     gender,
     age,
     fingerIndex,
@@ -513,19 +517,29 @@ export async function enrollVoter(data) {
     throw new Error("Citizen full name is required.");
   }
 
+  // Canonicalize region (Kokan, Marathvada, Paschim, Vidarbha)
+  const regionKey = sanitizeRegionKey(rawRegion || "Kokan");
+  const regionConfig = STATE_REGIONS[regionKey] || STATE_REGIONS.kokan;
+  const canonicalRegion = regionConfig.name;
+  const district = rawDistrict || regionConfig.districts[0];
+  const constituency = rawConstituency || `${canonicalRegion} - ${district}`;
+
   // Auto-allocate slot if not provided
   let slot = Number(rawSlot);
   if (!slot || isNaN(slot) || slot < 1 || slot > 127) {
-    let existingSlots = new Set();
+    const existingSlots = new Set();
     if (isMongoConnected) {
       try {
-        const docs = await FingerprintVoter.find({}, "fingerprintSlot").lean();
-        docs.forEach((d) => existingSlots.add(d.fingerprintSlot));
+        for (const reg of SUPPORTED_REGIONS) {
+          const Model = getRegionalVoterModel(reg);
+          const docs = await Model.find({}, "fingerprintSlot").lean();
+          docs.forEach((d) => existingSlots.add(d.fingerprintSlot));
+        }
       } catch {
-        existingSlots = new Set(Array.from(inMemoryVoters.values()).map((v) => v.fingerprintSlot));
+        Array.from(inMemoryVoters.values()).forEach((v) => existingSlots.add(v.fingerprintSlot));
       }
     } else {
-      existingSlots = new Set(Array.from(inMemoryVoters.values()).map((v) => v.fingerprintSlot));
+      Array.from(inMemoryVoters.values()).forEach((v) => existingSlots.add(v.fingerprintSlot));
     }
 
     slot = 1;
@@ -553,17 +567,12 @@ export async function enrollVoter(data) {
     hash = crypto.createHash("sha256").update(template).digest("hex");
   }
 
-  const region = data.region || "Konkan";
-  const defaultDist = region === "Vidarbha" ? "Nagpur" : region === "Marathwada" ? "Aurangabad" : region === "Paschim" ? "Pune" : "Mumbai";
-  const district = data.district || defaultDist;
-  const constituency = data.constituency || `${region} - ${district}`;
-
   const voterRecord = {
     voterId,
     fingerprintSlot: slot,
     name: name.trim(),
     constituency,
-    region,
+    region: canonicalRegion,
     district,
     gender: gender || "Undisclosed",
     age: age ? Number(age) : 25,
@@ -578,22 +587,14 @@ export async function enrollVoter(data) {
 
   if (isMongoConnected) {
     try {
-      // 1. Save into separate regional collection (e.g. voters_marathwada)
-      const RegionalVoterModel = getRegionalVoterModel(region);
+      // Save STRICTLY into the specific regional collection (e.g. voters_kokan, voters_marathvada)
+      const RegionalVoterModel = getRegionalVoterModel(regionKey);
       await RegionalVoterModel.findOneAndUpdate(
         { $or: [{ voterId }, { fingerprintSlot: slot }] },
         { $set: voterRecord },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
 
-      // 2. Also save into central FingerprintVoter collection
-      const doc = await FingerprintVoter.findOneAndUpdate(
-        { $or: [{ voterId }, { fingerprintSlot: slot }] },
-        { $set: voterRecord },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
-
-      // Keep in-memory cache synchronized
       inMemoryVoters.set(voterId, voterRecord);
 
       await logBiometricEvent({
@@ -601,28 +602,27 @@ export async function enrollVoter(data) {
         voterId,
         fingerprintSlot: slot,
         voterName: name,
-        region,
+        region: canonicalRegion,
         district,
-        details: `Enrolled citizen in slot #${slot} into voters_${region.toLowerCase()} [${constituency}]`,
+        details: `Citizen enrolled strictly in voters_${regionKey} [${constituency}]`,
         status: "SUCCESS"
       });
 
       return voterRecord;
     } catch (err) {
-      console.warn("MongoDB enroll failed, saving to in-memory store:", err.message);
+      console.warn("MongoDB regional enroll failed, buffering in memory:", err.message);
     }
   }
 
-  // Memory fallback
   inMemoryVoters.set(voterId, voterRecord);
   await logBiometricEvent({
     action: "ENROLL",
     voterId,
     fingerprintSlot: slot,
     voterName: name,
-    region,
+    region: canonicalRegion,
     district,
-    details: `Enrolled citizen in slot #${slot} [${region} - ${district}] (Buffer Mode)`,
+    details: `Citizen enrolled in slot #${slot} [${canonicalRegion} - ${district}] (Memory Mode)`,
     status: "SUCCESS"
   });
 
@@ -630,15 +630,18 @@ export async function enrollVoter(data) {
 }
 
 /**
- * Updates an existing voter's details
+ * Updates an existing voter's details in their regional collection
  */
 export async function updateVoter(voterId, updates) {
   if (isMongoConnected) {
     try {
-      const doc = await FingerprintVoter.findOneAndUpdate({ voterId }, updates, { new: true }).lean();
-      if (doc) {
-        inMemoryVoters.set(voterId, doc);
-        return doc;
+      for (const reg of SUPPORTED_REGIONS) {
+        const RegionalModel = getRegionalVoterModel(reg);
+        const doc = await RegionalModel.findOneAndUpdate({ voterId }, updates, { new: true }).lean();
+        if (doc) {
+          inMemoryVoters.set(voterId, doc);
+          return doc;
+        }
       }
     } catch (err) {
       console.warn("MongoDB update error:", err.message);
@@ -647,7 +650,7 @@ export async function updateVoter(voterId, updates) {
 
   if (inMemoryVoters.has(voterId)) {
     const existing = inMemoryVoters.get(voterId);
-    const updated = { ...existing, ...updates, updatedAt: new Date() };
+    const updated = { ...existing, ...updates };
     inMemoryVoters.set(voterId, updated);
     return updated;
   }
@@ -655,7 +658,7 @@ export async function updateVoter(voterId, updates) {
 }
 
 /**
- * Removes a voter record
+ * Removes a voter record from their regional collection
  */
 export async function deleteVoter(voterId) {
   let deleted = false;
@@ -664,25 +667,14 @@ export async function deleteVoter(voterId) {
 
   if (isMongoConnected) {
     try {
-      const doc = await FingerprintVoter.findOneAndDelete({ voterId }).lean();
-      if (doc) {
-        deleted = true;
-        slot = doc.fingerprintSlot;
-        name = doc.name;
-        if (doc.region) {
-          const RegionalModel = getRegionalVoterModel(doc.region);
-          await RegionalModel.findOneAndDelete({ voterId });
-        }
-      } else {
-        for (const reg of ["Konkan", "Vidarbha", "Marathwada", "Paschim"]) {
-          const RegionalModel = getRegionalVoterModel(reg);
-          const rDoc = await RegionalModel.findOneAndDelete({ voterId }).lean();
-          if (rDoc) {
-            deleted = true;
-            slot = rDoc.fingerprintSlot;
-            name = rDoc.name;
-            break;
-          }
+      for (const reg of SUPPORTED_REGIONS) {
+        const RegionalModel = getRegionalVoterModel(reg);
+        const doc = await RegionalModel.findOneAndDelete({ voterId }).lean();
+        if (doc) {
+          deleted = true;
+          slot = doc.fingerprintSlot;
+          name = doc.name;
+          break;
         }
       }
     } catch (err) {
@@ -704,7 +696,7 @@ export async function deleteVoter(voterId) {
       voterId,
       fingerprintSlot: slot,
       voterName: name,
-      details: `Revoked biometric profile from MongoDB`,
+      details: `Revoked biometric profile from regional collection`,
       status: "SUCCESS"
     });
   }
@@ -713,39 +705,26 @@ export async function deleteVoter(voterId) {
 }
 
 /**
- * Verifies a fingerprint scan against the database
+ * Verifies a fingerprint scan against regional voter collections
  */
 export async function verifyBiometric(criteria) {
   const { slotId, voterId, templateData, template, templateHash } = criteria;
   const inputTemplate = (templateData || template || "").trim().toUpperCase();
   let voter = null;
 
-  // 1. Direct template matching against MongoDB documents
   if (inputTemplate) {
     const hash = templateHash || crypto.createHash("sha256").update(inputTemplate).digest("hex");
     if (isMongoConnected) {
       try {
-        voter = await FingerprintVoter.findOne({
-          $or: [
-            { templateHash: hash },
-            { fingerprintTemplate: inputTemplate }
-          ]
-        }).lean();
-
-        if (!voter) {
-          for (const reg of ["Konkan", "Vidarbha", "Marathwada", "Paschim"]) {
-            const RegionalModel = getRegionalVoterModel(reg);
-            voter = await RegionalModel.findOne({
-              $or: [
-                { templateHash: hash },
-                { fingerprintTemplate: inputTemplate }
-              ]
-            }).lean();
-            if (voter) break;
-          }
+        for (const reg of SUPPORTED_REGIONS) {
+          const RegionalModel = getRegionalVoterModel(reg);
+          voter = await RegionalModel.findOne({
+            $or: [{ templateHash: hash }, { fingerprintTemplate: inputTemplate }]
+          }).lean();
+          if (voter) break;
         }
       } catch (err) {
-        console.warn("MongoDB verifyBiometric template error:", err.message);
+        console.warn("MongoDB verifyBiometric error:", err.message);
       }
     }
     if (!voter) {
@@ -755,7 +734,6 @@ export async function verifyBiometric(criteria) {
     }
   }
 
-  // 2. Verification by Slot ID directly from MongoDB
   if (!voter && slotId) {
     voter = await getVoterBySlot(slotId);
   } else if (!voter && voterId) {
@@ -765,13 +743,13 @@ export async function verifyBiometric(criteria) {
   if (!voter) {
     await logBiometricEvent({
       action: "SCAN_NO_MATCH",
-      details: `Fingerprint verify failed: No matching template found in MongoDB (Slot: ${slotId || "N/A"})`,
+      details: `Fingerprint verify failed: No matching template found in regional collections (Slot: ${slotId || "N/A"})`,
       status: "WARNING"
     });
     return {
       matched: false,
       verified: false,
-      message: "No matching biometric profile found in MongoDB database"
+      message: "No matching biometric profile found in regional MongoDB collections"
     };
   }
 
@@ -782,14 +760,14 @@ export async function verifyBiometric(criteria) {
     voterName: voter.name,
     region: voter.region,
     district: voter.district,
-    details: `Biometric verification confirmed directly from MongoDB (Flash memory bypassed)`,
+    details: `Biometric verification confirmed from voters_${sanitizeRegionKey(voter.region)}`,
     status: "SUCCESS"
   });
 
   return {
     matched: true,
     verified: true,
-    source: "MONGODB_ATLAS",
+    source: `voters_${sanitizeRegionKey(voter.region)}`,
     flashMemoryBypassed: true,
     voter: {
       voterId: voter.voterId,
@@ -811,7 +789,7 @@ export async function verifyBiometric(criteria) {
 }
 
 /**
- * Records a cast vote against the biometric voter record
+ * Records an incoming vote strictly into the designated regional vote collection (votes_kokan, etc.)
  */
 export async function recordBiometricVote({
   voterId,
@@ -825,7 +803,7 @@ export async function recordBiometricVote({
 }) {
   let voter = await getVoterById(voterId);
 
-  // If voter is not yet registered (e.g. ad-hoc ID simulated via UI), auto-enroll them
+  // If voter is not yet registered, auto-enroll them in their designated region
   if (!voter) {
     let slot = 1;
     const match = voterId.match(/(\d+)/);
@@ -835,37 +813,33 @@ export async function recordBiometricVote({
       voterId,
       fingerprintSlot: slot > 0 && slot <= 127 ? slot : undefined,
       name: `Citizen ${voterId}`,
-      region: region || "Konkan",
+      region: region || "Kokan",
       district: district || "Mumbai"
     });
   }
 
-  const effectiveRegion = region || voter.region || "Konkan";
-  const effectiveDistrict = district || voter.district || "Mumbai";
+  const effectiveRegion = region || voter.region || "Kokan";
+  const regKey = sanitizeRegionKey(effectiveRegion);
+  const effectiveDistrict = district || voter.district || (STATE_REGIONS[regKey]?.districts[0] || "Mumbai");
   const constituency = voter.constituency || `${effectiveRegion} - ${effectiveDistrict}`;
 
   if (isMongoConnected) {
     try {
-      // 1. Store vote record in dedicated regional collection (e.g. votes_marathwada)
-      const RegionalVoteModel = getRegionalVoteModel(effectiveRegion);
-      await RegionalVoteModel.create({
-        voterId,
-        constituency,
-        region: effectiveRegion,
-        district: effectiveDistrict,
-        party,
-        transactionHash: transactionHash || null,
-        blockNumber: blockNumber || null,
-        votedAt: getISTTimestamp(),
-        votedAtIST: getISTTimestamp()
-      });
-
-      // 2. Set hasVoted: true in regional voter collection (e.g. voters_marathwada)
-      const RegionalVoterModel = getRegionalVoterModel(effectiveRegion);
-      await RegionalVoterModel.updateOne({ voterId }, { $set: { hasVoted: true } });
-
-      // 3. Set hasVoted: true in central collection
-      await FingerprintVoter.updateOne({ voterId }, { $set: { hasVoted: true } });
+      // Persist ballot details directly within the voter's single regional collection (voters_kokan, etc.)
+      const RegionalVoterModel = getRegionalVoterModel(regKey);
+      await RegionalVoterModel.updateOne(
+        { voterId },
+        {
+          $set: {
+            hasVoted: true,
+            votedParty: party,
+            transactionHash: transactionHash || null,
+            blockNumber: blockNumber || null,
+            votedAt: getISTTimestamp(),
+            votedAtIST: getISTTimestamp()
+          }
+        }
+      );
     } catch (err) {
       console.warn("MongoDB recordBiometricVote error:", err.message);
     }
@@ -890,7 +864,7 @@ export async function recordBiometricVote({
     transactionHash,
     blockNumber,
     electionRound,
-    details: `Ballot cast saved in votes_${effectiveRegion.toLowerCase()} & Ethereum Sepolia Block #${blockNumber}`,
+    details: `Ballot saved strictly in votes_${regKey} & Ethereum Sepolia Block #${blockNumber}`,
     status: "SUCCESS"
   });
 
@@ -898,35 +872,29 @@ export async function recordBiometricVote({
 }
 
 /**
- * Resets the voting flag for all registered voters for a new election round
+ * Resets the voting flag for all registered voters across the 4 regional collections
  */
 export async function resetBiometricsForRound(newRound) {
   if (isMongoConnected) {
     try {
-      await FingerprintVoter.updateMany({}, { $set: { hasVoted: false } });
-
-      for (const reg of ["Konkan", "Vidarbha", "Marathwada", "Paschim"]) {
+      for (const reg of SUPPORTED_REGIONS) {
         const RegionalVoterModel = getRegionalVoterModel(reg);
         await RegionalVoterModel.updateMany({}, { $set: { hasVoted: false } });
       }
-      console.log("🔄 [MONGODB] Reset hasVoted = false across all regional voter collections!");
+      console.log("🔄 [MONGODB] Reset hasVoted = false across all 4 regional voter collections!");
     } catch (err) {
       console.warn("MongoDB reset error:", err.message);
     }
   }
 
-  // Update in-memory
   for (const [key, v] of inMemoryVoters.entries()) {
-    inMemoryVoters.set(key, {
-      ...v,
-      hasVoted: false
-    });
+    inMemoryVoters.set(key, { ...v, hasVoted: false });
   }
 
   await logBiometricEvent({
     action: "RESET",
     electionRound: newRound,
-    details: `Voter registry reset for Election Round #${newRound}. All citizens eligible to vote again.`,
+    details: `Voter registry reset for Election Round #${newRound}. All citizens eligible across regional divisions.`,
     status: "SUCCESS"
   });
 
@@ -974,18 +942,20 @@ export async function getAuditLogs(limit = 25) {
 }
 
 /**
- * Returns biometric statistics
+ * Returns biometric turnout statistics aggregated across the 4 regional collections
  */
 export async function getBiometricStats() {
   let total = 0;
   let voted = 0;
-  let unvoted = 0;
 
   if (isMongoConnected) {
     try {
-      total = await FingerprintVoter.countDocuments();
-      voted = await FingerprintVoter.countDocuments({ hasVoted: true });
-      unvoted = total - voted;
+      for (const reg of SUPPORTED_REGIONS) {
+        const Model = getRegionalVoterModel(reg);
+        total += await Model.countDocuments();
+        voted += await Model.countDocuments({ hasVoted: true });
+      }
+      const unvoted = total - voted;
       return { total, voted, unvoted, turnoutPct: total > 0 ? ((voted / total) * 100).toFixed(1) : "0.0" };
     } catch {}
   }
@@ -993,7 +963,7 @@ export async function getBiometricStats() {
   const list = Array.from(inMemoryVoters.values());
   total = list.length;
   voted = list.filter((v) => v.hasVoted).length;
-  unvoted = total - voted;
+  const unvoted = total - voted;
 
   return {
     total,
@@ -1004,7 +974,7 @@ export async function getBiometricStats() {
 }
 
 /**
- * Fetches all voter templates directly from MongoDB for hardware verification
+ * Fetches all voter templates from regional collections for hardware verification
  */
 export async function getAllVoterTemplates() {
   const res = await getVoters({ limit: 127 });

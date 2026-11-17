@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 /**
  * Formats a Date into Indian Standard Time (IST - Asia/Kolkata, UTC+05:30)
- * Example output: "2026-10-30 10:25:30 IST"
+ * Example output: "2026-11-01 10:25:30 IST"
  */
 export function getISTTimestamp(date = new Date()) {
   if (typeof date === "string" && date.includes("IST")) {
@@ -48,8 +48,7 @@ export function getISTTimestamp(date = new Date()) {
 }
 
 /**
- * Returns ISO-8601 string with explicit IST (+05:30) offset:
- * Example: "2026-10-30T10:25:40.123+05:30"
+ * Returns ISO-8601 string with explicit IST (+05:30) offset
  */
 export function getISTISO(date = new Date()) {
   const d = date instanceof Date ? date : new Date(date);
@@ -61,9 +60,30 @@ export function getISTISO(date = new Date()) {
 }
 
 /**
- * Citizen Voter Schema
- * Stores demographic information, franchise identification, and biometric templates on MongoDB:
- * _id, voterId, name, constituency, region, district, age, gender, fingerIndex, fingerprintTemplate, templateHash, fingerprintSlot, hasVoted, registrationAt
+ * Canonical 4 Administrative Regional Divisions of Maharashtra:
+ * 1. Kokan (Mumbai, Thane, Raigad, Palghar, Ratnagiri, Sindhudurg)
+ * 2. Marathvada (Chhatrapati Sambhajinagar, Nanded, Latur, Jalna, Beed, Parbhani, Osmanabad)
+ * 3. Paschim (Pune, Kolhapur, Satara, Solapur, Sangli)
+ * 4. Vidarbha (Amravati, Nagpur, Akola, Wardha, Yavatmal, Chandrapur)
+ */
+export const SUPPORTED_REGIONS = ["kokan", "marathvada", "paschim", "vidarbha"];
+
+/**
+ * Normalizes state region string to canonical regional key (e.g. "Kokan" -> "kokan")
+ */
+export function sanitizeRegionKey(region) {
+  const norm = (region || "kokan").toLowerCase().trim();
+  if (norm.includes("vidarbha") || norm.includes("amravati") || norm.includes("nagpur")) return "vidarbha";
+  if (norm.includes("marath")) return "marathvada";
+  if (norm.includes("paschim") || norm.includes("pune") || norm.includes("kolhapur") || norm.includes("western")) return "paschim";
+  if (norm.includes("kokan") || norm.includes("konkan") || norm.includes("mumbai") || norm.includes("thane")) return "kokan";
+  return "kokan";
+}
+
+/**
+ * Minimal Regional Voter Schema
+ * Stored strictly within dedicated regional collections:
+ * voters_kokan, voters_marathvada, voters_paschim, voters_vidarbha
  */
 export const MinimalVoterSchema = new mongoose.Schema(
   {
@@ -88,8 +108,8 @@ export const MinimalVoterSchema = new mongoose.Schema(
     },
     region: {
       type: String,
-      enum: ["Konkan", "Vidarbha", "Marathwada", "Paschim"],
-      default: "Konkan",
+      enum: ["Kokan", "Marathvada", "Paschim", "Vidarbha", "Konkan", "Marathwada"],
+      default: "Kokan",
       index: true
     },
     district: {
@@ -131,6 +151,26 @@ export const MinimalVoterSchema = new mongoose.Schema(
       default: false,
       index: true
     },
+    votedParty: {
+      type: String,
+      default: null
+    },
+    transactionHash: {
+      type: String,
+      default: null
+    },
+    blockNumber: {
+      type: Number,
+      default: null
+    },
+    votedAt: {
+      type: String,
+      default: null
+    },
+    votedAtIST: {
+      type: String,
+      default: null
+    },
     registrationAt: {
       type: String,
       default: () => getISTTimestamp()
@@ -151,8 +191,9 @@ export const MinimalVoterSchema = new mongoose.Schema(
 );
 
 /**
- * Minimal Regional Vote Schema
- * Cast ballots partitioned by constituency into separate collections (votes_konkan, votes_vidarbha, etc.)
+ * Regional Cast Votes Schema
+ * Incoming cast ballots partitioned strictly by region into separate collections:
+ * votes_kokan, votes_marathvada, votes_paschim, votes_vidarbha
  */
 export const RegionalVoteSchema = new mongoose.Schema(
   {
@@ -201,18 +242,8 @@ export const RegionalVoteSchema = new mongoose.Schema(
 );
 
 /**
- * Normalizes state region string (e.g. "Konkan" -> "konkan")
- */
-function sanitizeRegionKey(region) {
-  const norm = (region || "Konkan").toLowerCase().trim();
-  if (norm.includes("vidarbha")) return "vidarbha";
-  if (norm.includes("marathwada")) return "marathwada";
-  if (norm.includes("paschim")) return "paschim";
-  return "konkan";
-}
-
-/**
- * Factory for regional citizen voter models
+ * Factory for regional citizen voter models (voters_kokan, voters_marathvada, etc.)
+ * Serves as the single unified collection for both voter registration and cast ballot status per region.
  */
 export function getRegionalVoterModel(region) {
   const key = sanitizeRegionKey(region);
@@ -222,14 +253,11 @@ export function getRegionalVoterModel(region) {
 }
 
 /**
- * Factory for regional cast votes models
+ * Maps to the unified single regional collection for backward compatibility
  */
 export function getRegionalVoteModel(region) {
-  const key = sanitizeRegionKey(region);
-  const collectionName = `votes_${key}`;
-  const modelName = `Vote_${key}`;
-  return mongoose.models[modelName] || mongoose.model(modelName, RegionalVoteSchema, collectionName);
+  return getRegionalVoterModel(region);
 }
 
-export const FingerprintVoter = mongoose.models.FingerprintVoter || mongoose.model("FingerprintVoter", MinimalVoterSchema, "fingerprintvoters");
-export default FingerprintVoter;
+// Obsolete combined collection is retired; export regional model factory as default
+export default getRegionalVoterModel;

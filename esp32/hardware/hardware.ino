@@ -18,7 +18,7 @@
    - If Wi-Fi is unavailable, the firmware gracefully operates in Standalone
      Offline Mode.
  * ===============================================================================
- */
+*/
 
 #include <Adafruit_Fingerprint.h>
 #include <HTTPClient.h>
@@ -58,8 +58,8 @@
 // 2. NETWORK & SERVER CONFIGURATION
 // ===============================================================================
 // Replace with your Wi-Fi credentials:
-const char *WIFI_SSID = "payal";
-const char *WIFI_PASSWORD = "123456789";
+const char *WIFI_SSID = "Vivo t2x";
+const char *WIFI_PASSWORD = "11111111";
 
 // ===============================================================================
 // DYNAMIC SERVER HOST CONFIGURATION
@@ -67,7 +67,7 @@ const char *WIFI_PASSWORD = "123456789";
 // -> UPDATE ONLY THIS ONE VARIABLE BELOW:
 // ===============================================================================
 const char *SERVER_IP =
-    "10.174.120.167";         // <-- Current Hotspot Wi-Fi IP (Updated)
+    "10.119.183.167";         // <-- Current Hotspot Wi-Fi IP (Updated)
 const int SERVER_PORT = 3000; // Port of node server.js
 
 // Dynamic API endpoints automatically constructed from SERVER_IP and

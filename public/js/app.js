@@ -414,7 +414,14 @@ function renderTallies(data) {
   const regContainer = document.getElementById("regional-tallies-container");
   if (regContainer && data.regionalTallies) {
     regContainer.innerHTML = "";
-    Object.entries(data.regionalTallies).forEach(([regName, partyVotes]) => {
+    const renderedRegions = new Set();
+    Object.entries(data.regionalTallies).forEach(([rawName, partyVotes]) => {
+      const norm = rawName.toLowerCase();
+      const regName = norm.includes("vidarbha") ? "Vidarbha" :
+        norm.includes("marath") ? "Marathvada" :
+        (norm.includes("paschim") || norm.includes("pune")) ? "Paschim" : "Kokan";
+      if (renderedRegions.has(regName)) return;
+      renderedRegions.add(regName);
       const regDistricts = STATE_DISTRICTS[regName] || [];
       const regCard = document.createElement("div");
       regCard.style.cssText = "background: rgba(14, 18, 27, 0.7); border: 1px solid var(--border-glass); border-radius: 8px; padding: 14px;";
@@ -1099,8 +1106,15 @@ function renderBiometricVoters(voters) {
     filtered = filtered.filter(v => !v.hasVoted);
   } else if (appState.biometricFilter === "voted") {
     filtered = filtered.filter(v => v.hasVoted);
-  } else if (["konkan", "vidarbha", "marathwada", "paschim"].includes(appState.biometricFilter.toLowerCase())) {
-    filtered = filtered.filter(v => v.region && v.region.toLowerCase() === appState.biometricFilter.toLowerCase());
+  } else if (["kokan", "konkan", "vidarbha", "marathvada", "marathwada", "paschim"].includes(appState.biometricFilter.toLowerCase())) {
+    const f = appState.biometricFilter.toLowerCase();
+    filtered = filtered.filter(v => {
+      const vr = (v.region || "").toLowerCase();
+      return vr === f ||
+        (f.includes("kokan") && vr.includes("konkan")) ||
+        (f.includes("konkan") && vr.includes("kokan")) ||
+        (f.includes("marath") && vr.includes("marath"));
+    });
   }
 
   // Apply Search
